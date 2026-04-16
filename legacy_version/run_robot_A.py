@@ -2,22 +2,15 @@
 run_robot_A.py  (auto-generated)
 =====================================================
 Path is embedded below - no CSV file needed.
-Re-run compute_path.py or use the website to regenerate.
+Re-run compute_path_A.py or use the website to regenerate.
 
 TWO WRAPPING MODES - change WRAP_MODE to swap:
   "arc"      = arc_left using computed sweep angle (fast, more accurate)
   "navigate" = follow reduced waypoints via navigate_to (slow, most accurate)
-
-IR POLE CENTERING:
-  Before each wrap, the robot turns to face the known pole position,
-  then dithers a few degrees to find the peak IR return. This corrects
-  accumulated heading drift from wheel odometry. Set CENTER_ON_POLE=False
-  to disable.
 """
 
 from irobot_edu_sdk.backend.bluetooth import Bluetooth
 from irobot_edu_sdk.robots import event, Create3
-import math
 
 # ==================================================================
 # CONFIG
@@ -34,52 +27,76 @@ WRAP_MODE = "arc"
 # WRAP_MODE = "navigate"
 
 # ==================================================================
-# IR CENTERING  (fine heading correction before each wrap)
-# ==================================================================
-CENTER_ON_POLE    = True    # set False to disable
-CENTER_SEARCH_DEG = 8       # +/- degrees to dither
-CENTER_STEP_DEG   = 1       # degree increment per dither step
-CENTER_SAMPLES    = 3       # IR samples averaged per step
-CENTER_SENSOR_IDX = 3       # center sensor of 7-sensor IR array
-
-# Pole positions in the robot's LOCAL frame (world coords minus
-# start position). reset_navigation() makes local = robot odom frame.
-POLE_POSITIONS = {
-    1: (0, 75),
-    4: (175, 70),
-}
-
-# ==================================================================
-# EMBEDDED PATH  (52 waypoints, reduced for robot)
+# EMBEDDED PATH  (92 waypoints, reduced for robot)
 # arc_deg: total sweep angle for each pole wrap (on first wrap pt)
 # ==================================================================
 
 PATH = [
     {"x": 0, "y": 0, "type": "start", "pole": 0, "arc_deg": 0},
     {"x": 36.772, "y": 30.1467, "type": "move", "pole": 1, "arc_deg": 0},
-    {"x": 39.0724, "y": 32.1357, "type": "wrap", "pole": 1, "arc_deg": 679.02},
-    {"x": 55.2836, "y": 57.4581, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": 56.6382, "y": 87.4946, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": 42.7721, "y": 114.1733, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": 17.4115, "y": 130.3248, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -12.6281, "y": 131.6086, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -39.2741, "y": 117.6796, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -55.3657, "y": 92.2811, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -56.5787, "y": 62.2385, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -42.5869, "y": 35.6254, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -17.1505, "y": 19.5937, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": 12.8948, "y": 18.4516, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": 39.4749, "y": 32.5061, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": 55.4466, "y": 57.9802, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": 56.5179, "y": 88.0281, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": 42.4007, "y": 114.5749, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": 16.8891, "y": 130.4866, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -13.1613, "y": 131.487, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -39.6748, "y": 117.3073, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -55.5262, "y": 91.7582, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -56.4558, "y": 61.7055, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -42.2137, "y": 35.2256, "type": "wrap", "pole": 1, "arc_deg": 0},
-    {"x": -16.6272, "y": 19.4344, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 39.0717, "y": 32.135, "type": "wrap", "pole": 1, "arc_deg": 570.67},
+    {"x": 55.2804, "y": 57.4478, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 56.6426, "y": 87.4744, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 42.7926, "y": 114.1509, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 17.45, "y": 130.3127, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -12.5791, "y": 131.6195, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -39.2299, "y": 117.7202, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -55.3449, "y": 92.3477, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -56.5961, "y": 62.3162, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -42.6475, "y": 35.6911, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -17.2453, "y": 19.6231, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 12.7885, "y": 18.4274, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 39.3877, "y": 32.4252, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 55.4087, "y": 57.8572, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 56.5488, "y": 87.8931, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 42.5019, "y": 114.4663, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 17.0403, "y": 130.4403, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -12.9976, "y": 131.5249, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -39.5449, "y": 117.4288, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -54.508, "y": 94.8211, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -154.508, "y": -180.1789, "type": "move", "pole": 2, "arc_deg": 0},
+    {"x": -155.4707, "y": -183.0588, "type": "wrap", "pole": 2, "arc_deg": 540.0},
+    {"x": -156.5096, "y": -213.0638, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -142.4068, "y": -239.5684, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -116.9412, "y": -255.4707, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -86.9362, "y": -256.5096, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -60.4316, "y": -242.4068, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -44.5293, "y": -216.9412, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -43.4904, "y": -186.9362, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -57.5932, "y": -160.4316, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -83.0588, "y": -144.5293, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -113.0638, "y": -143.4904, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -139.5684, "y": -157.5932, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -155.4707, "y": -183.0588, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -156.5096, "y": -213.0638, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -142.4068, "y": -239.5684, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -116.9412, "y": -255.4707, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -86.9362, "y": -256.5096, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -60.4316, "y": -242.4068, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -45.492, "y": -219.8211, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": 54.508, "y": 55.1789, "type": "move", "pole": 1, "arc_deg": 0},
+    {"x": 55.4711, "y": 58.0603, "type": "wrap", "pole": 1, "arc_deg": 648.35},
+    {"x": 56.5056, "y": 88.0812, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 42.3836, "y": 114.5933, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 16.893, "y": 130.4854, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -13.1287, "y": 131.4946, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -39.6289, "y": 117.3503, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -55.4995, "y": 91.8464, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -56.4835, "y": 61.8239, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -42.317, "y": 35.3355, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -16.7998, "y": 19.4863, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 13.2236, "y": 18.5276, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 39.7, "y": 32.7163, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 55.5278, "y": 58.2468, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 56.4613, "y": 88.271, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 42.2503, "y": 114.7355, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 16.7065, "y": 130.5418, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -13.3184, "y": 131.4501, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -39.771, "y": 117.2169, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -55.5558, "y": 91.6599, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -56.4389, "y": 61.6341, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -42.1835, "y": 35.1935, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -16.6132, "y": 19.4302, "type": "wrap", "pole": 1, "arc_deg": 0},
     {"x": -1.6565, "y": 17.0237, "type": "wrap", "pole": 1, "arc_deg": 0},
     {"x": 173.3435, "y": 12.0237, "type": "move", "pole": 4, "arc_deg": 0},
     {"x": 176.3801, "y": 12.0164, "type": "wrap", "pole": 4, "arc_deg": 720.0},
@@ -115,60 +132,6 @@ PATH = [
 
 robot = Create3(Bluetooth())
 
-
-async def center_on_pole(robot, pole_id):
-    """Face the pole using known coords, then dither IR for peak."""
-    if pole_id not in POLE_POSITIONS:
-        print("  [center] no known position for pole " + str(pole_id) + ", skipping")
-        return
-
-    pose = await robot.get_position()
-    rx, ry, rh = pose.x, pose.y, pose.heading
-
-    px, py = POLE_POSITIONS[pole_id]
-    target_heading = math.degrees(math.atan2(py - ry, px - rx))
-
-    delta = target_heading - rh
-    while delta > 180:  delta -= 360
-    while delta < -180: delta += 360
-
-    print("  [center] facing pole " + str(pole_id) +
-          " (turning " + str(round(delta, 1)) + " deg)")
-
-    if delta >= 0:
-        await robot.turn_left(delta)
-    else:
-        await robot.turn_right(-delta)
-
-    # Dither: turn right to leftmost edge of sweep, then step LEFT across it
-    await robot.turn_right(CENTER_SEARCH_DEG)
-
-    best_reading = -1
-    best_index   = 0
-    num_steps    = int(2 * CENTER_SEARCH_DEG / CENTER_STEP_DEG)
-
-    for step in range(num_steps + 1):
-        total = 0
-        for _ in range(CENTER_SAMPLES):
-            ir = await robot.get_ir_proximity()
-            total += ir.sensors[CENTER_SENSOR_IDX]
-        avg = total / CENTER_SAMPLES
-        if avg > best_reading:
-            best_reading = avg
-            best_index   = step
-        if step < num_steps:
-            await robot.turn_left(CENTER_STEP_DEG)
-
-    back = (num_steps - best_index) * CENTER_STEP_DEG
-    if back > 0:
-        await robot.turn_right(back)
-
-    offset = (best_index * CENTER_STEP_DEG) - CENTER_SEARCH_DEG
-    print("  [center] locked on pole " + str(pole_id) +
-          " | best_ir=" + str(round(best_reading, 1)) +
-          " | heading offset=" + str(round(offset, 1)) + " deg")
-
-
 @event(robot.when_play)
 async def play(robot):
     await robot.reset_navigation()
@@ -190,16 +153,10 @@ async def play(robot):
 
         elif pt["type"] == "wrap":
 
-            prev = PATH[i - 1] if i > 0 else None
-            is_first_wrap = (prev is None or prev["type"] != "wrap"
-                             or prev["pole"] != pt["pole"])
-
-            if is_first_wrap and CENTER_ON_POLE:
-                await center_on_pole(robot, pt["pole"])
-
             # ARC MODE
             if WRAP_MODE == "arc":
-                if is_first_wrap:
+                prev = PATH[i - 1] if i > 0 else None
+                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:
                     await robot.set_lights_spin_rgb(255, 115, 0)
                     sweep = pt.get("arc_deg", 360)
                     print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode, " + str(round(sweep, 1)) + " deg]")
@@ -210,7 +167,8 @@ async def play(robot):
 
             # NAVIGATE MODE
             elif WRAP_MODE == "navigate":
-                if is_first_wrap:
+                prev = PATH[i - 1] if i > 0 else None
+                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:
                     await robot.set_lights_spin_rgb(255, 115, 0)
                     print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [navigate mode]")
 

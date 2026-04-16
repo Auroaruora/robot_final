@@ -2,22 +2,15 @@
 run_robot_B.py  (auto-generated)
 =====================================================
 Path is embedded below - no CSV file needed.
-Re-run compute_path.py or use the website to regenerate.
+Re-run compute_path_B.py or use the website to regenerate.
 
 TWO WRAPPING MODES - change WRAP_MODE to swap:
   "arc"      = arc_right using computed sweep angle (fast, more accurate)
   "navigate" = follow reduced waypoints via navigate_to (slow, most accurate)
-
-IR POLE CENTERING:
-  Before each wrap, the robot turns to face the known pole position,
-  then dithers a few degrees to find the peak IR return. This corrects
-  accumulated heading drift from wheel odometry. Set CENTER_ON_POLE=False
-  to disable.
 """
 
 from irobot_edu_sdk.backend.bluetooth import Bluetooth
 from irobot_edu_sdk.robots import event, Create3
-import math
 
 # ==================================================================
 # CONFIG
@@ -32,24 +25,6 @@ ARC_R   = 58
 # ==================================================================
 WRAP_MODE = "arc"
 # WRAP_MODE = "navigate"
-
-# ==================================================================
-# IR CENTERING  (fine heading correction before each wrap)
-# ==================================================================
-CENTER_ON_POLE    = True    # set False to disable
-CENTER_SEARCH_DEG = 8       # +/- degrees to dither
-CENTER_STEP_DEG   = 1       # degree increment per dither step
-CENTER_SAMPLES    = 3       # IR samples averaged per step
-CENTER_SENSOR_IDX = 3       # center sensor of 7-sensor IR array
-
-# Pole positions in the robot's LOCAL frame (world coords minus
-# start position). reset_navigation() makes local = robot odom frame.
-POLE_POSITIONS = {
-    1: (120, -125),
-    3: (0, -80),
-    4: (295, -130),
-    5: (270, -350),
-}
 
 # ==================================================================
 # EMBEDDED PATH  (96 waypoints, reduced for robot)
@@ -161,60 +136,6 @@ PATH = [
 
 robot = Create3(Bluetooth())
 
-
-async def center_on_pole(robot, pole_id):
-    """Face the pole using known coords, then dither IR for peak."""
-    if pole_id not in POLE_POSITIONS:
-        print("  [center] no known position for pole " + str(pole_id) + ", skipping")
-        return
-
-    pose = await robot.get_position()
-    rx, ry, rh = pose.x, pose.y, pose.heading
-
-    px, py = POLE_POSITIONS[pole_id]
-    target_heading = math.degrees(math.atan2(py - ry, px - rx))
-
-    delta = target_heading - rh
-    while delta > 180:  delta -= 360
-    while delta < -180: delta += 360
-
-    print("  [center] facing pole " + str(pole_id) +
-          " (turning " + str(round(delta, 1)) + " deg)")
-
-    if delta >= 0:
-        await robot.turn_left(delta)
-    else:
-        await robot.turn_right(-delta)
-
-    # Dither: turn right to leftmost edge of sweep, then step LEFT across it
-    await robot.turn_right(CENTER_SEARCH_DEG)
-
-    best_reading = -1
-    best_index   = 0
-    num_steps    = int(2 * CENTER_SEARCH_DEG / CENTER_STEP_DEG)
-
-    for step in range(num_steps + 1):
-        total = 0
-        for _ in range(CENTER_SAMPLES):
-            ir = await robot.get_ir_proximity()
-            total += ir.sensors[CENTER_SENSOR_IDX]
-        avg = total / CENTER_SAMPLES
-        if avg > best_reading:
-            best_reading = avg
-            best_index   = step
-        if step < num_steps:
-            await robot.turn_left(CENTER_STEP_DEG)
-
-    back = (num_steps - best_index) * CENTER_STEP_DEG
-    if back > 0:
-        await robot.turn_right(back)
-
-    offset = (best_index * CENTER_STEP_DEG) - CENTER_SEARCH_DEG
-    print("  [center] locked on pole " + str(pole_id) +
-          " | best_ir=" + str(round(best_reading, 1)) +
-          " | heading offset=" + str(round(offset, 1)) + " deg")
-
-
 @event(robot.when_play)
 async def play(robot):
     await robot.reset_navigation()
@@ -236,16 +157,10 @@ async def play(robot):
 
         elif pt["type"] == "wrap":
 
-            prev = PATH[i - 1] if i > 0 else None
-            is_first_wrap = (prev is None or prev["type"] != "wrap"
-                             or prev["pole"] != pt["pole"])
-
-            if is_first_wrap and CENTER_ON_POLE:
-                await center_on_pole(robot, pt["pole"])
-
             # ARC MODE
             if WRAP_MODE == "arc":
-                if is_first_wrap:
+                prev = PATH[i - 1] if i > 0 else None
+                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:
                     await robot.set_lights_spin_rgb(255, 115, 0)
                     sweep = pt.get("arc_deg", 360)
                     print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode, " + str(round(sweep, 1)) + " deg]")
@@ -256,7 +171,8 @@ async def play(robot):
 
             # NAVIGATE MODE
             elif WRAP_MODE == "navigate":
-                if is_first_wrap:
+                prev = PATH[i - 1] if i > 0 else None
+                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:
                     await robot.set_lights_spin_rgb(255, 115, 0)
                     print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [navigate mode]")
 

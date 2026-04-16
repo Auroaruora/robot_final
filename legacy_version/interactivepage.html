@@ -14,19 +14,20 @@
 <div class="modal-overlay" id="startupModal">
   <div class="modal">
     <h2>Open Project Folder</h2>
-    <p>Select the <strong>folder</strong> containing your <strong>compute_path.py</strong> file.<br></p>
+    <p>Select the <strong>folder</strong> containing your <strong>compute_path_A.py</strong> and <strong>compute_path_B.py</strong> files.<br></p>
     <button class="folder-btn" id="folderBtn" onclick="pickFolder()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
       Choose folder
     </button>
     <div class="status" id="modalStatus"></div>
     <div class="files-found hidden" id="filesFound">
-      <div class="ff"><span class="dot" id="dotMain"></span><span id="labelMain">compute_path.py</span></div>
+      <div class="ff"><span class="dot" id="dotA"></span><span id="labelA">compute_path_A.py</span></div>
+      <div class="ff"><span class="dot" id="dotB"></span><span id="labelB">compute_path_B.py</span></div>
     </div>
     <div class="pyodide-status loading" id="pyodideStatus">
       <span class="spinner"></span> Loading Pyodide (Python runtime)…
     </div>
-    <div class="hint">compute_path.py must be in the selected folder.<br>Chrome or Edge required (File System Access API).<br>Python runs entirely in your browser — nothing is sent to a server.</div>
+    <div class="hint">Both compute_path_*.py files must be in the selected folder.<br>Chrome or Edge required (File System Access API).<br>Python runs entirely in your browser — nothing is sent to a server.</div>
   </div>
 </div>
 
@@ -85,7 +86,8 @@
   <div class="Pane" id="P-code">
     <div class="code-pane">
       <div class="ctabs">
-        <div class="ctab on">compute_path.py</div>
+        <div class="ctab on" onclick="swCode('A')">compute_path_A.py</div>
+        <div class="ctab" onclick="swCode('B')">compute_path_B.py</div>
       </div>
       <div class="file-btns">
         <button class="file-btn save" onclick="saveFile()">💾 Save</button>
@@ -134,7 +136,7 @@
 // STATE
 // ═══════════════════════════════════════════════════════
 let pyodide=null, pyodideReady=false, dirHandle=null;
-let fileHandle=null, fileContent='';
+let fileHandles={A:null,B:null}, fileContents={A:'',B:''}, curTab='A';
 let POLES={1:[-50,0],2:[-200,-100],3:[-120,120],4:[10,150],5:[150,-150]};
 let POLE_R=5,ROBOT_R=17,SAFETY=12,ARC_R=34;
 let ROBOTS={
@@ -210,227 +212,187 @@ def _pts_to_csv(pts):
         w.writerow([i, round(p["x"],4), round(p["y"],4), p["type"], p["pole"], p.get("arc_deg", 0)])
     return cb.getvalue()
 
-def _generate_driver_code(rid, robot_pts, ns):
-    """Build a self-contained run_robot_<rid>.py with embedded PATH + POLE_POSITIONS."""
-    robots_cfg = ns.get("ROBOTS", {})
-    cfg       = robots_cfg.get(rid, {})
-    poles     = ns.get("POLES", {})
-    arc_r     = ns.get("ARC_R", 58)
-    direction = cfg.get("dir", "ccw")
-    circles   = cfg.get("circles", 1)
-    start     = cfg.get("start", [0, 0])
-    seq       = cfg.get("seq", [])
+def _generate_driver_code(rid, robot_pts, cfg):
+    start = cfg.get("START", [0, 0])
+    direction = cfg.get("DIR", "ccw")
+    circles = cfg.get("CIRCLES", 1)
+    arc_r = cfg.get("ARC_R", 34)
 
     sx, sy = start[0], start[1]
     local = [{"x": round(p["x"] - sx, 4), "y": round(p["y"] - sy, 4),
               "type": p["type"], "pole": p["pole"],
               "arc_deg": p.get("arc_deg", 0)} for p in robot_pts]
 
-    path_body = []
+    lines = []
     for p in local:
-        path_body.append('    {"x": ' + str(p["x"]) + ', "y": ' + str(p["y"]) +
-                         ', "type": "' + p["type"] + '", "pole": ' + str(p["pole"]) +
-                         ', "arc_deg": ' + str(p["arc_deg"]) + '},')
-    path_literal = "[\\n" + "\\n".join(path_body) + "\\n]"
-
-    # POLE_POSITIONS in robot-local frame, only for poles this robot visits.
-    used = sorted({int(pid) for pid in seq})
-    pole_body = []
-    for pid in used:
-        key = pid if pid in poles else str(pid)
-        if key not in poles:
-            continue
-        px, py = poles[key]
-        pole_body.append("    " + str(pid) + ": (" +
-                         str(round(px - sx, 4)) + ", " +
-                         str(round(py - sy, 4)) + "),")
-    poles_literal = "{\\n" + "\\n".join(pole_body) + "\\n}"
+        lines.append('    {"x": ' + str(p["x"]) + ', "y": ' + str(p["y"]) +
+                     ', "type": "' + p["type"] + '", "pole": ' + str(p["pole"]) +
+                     ', "arc_deg": ' + str(p["arc_deg"]) + '},')
+    path_literal = "[\\n" + "\\n".join(lines) + "\\n]"
 
     arc_cmd = "arc_left" if direction == "ccw" else "arc_right"
     if rid == "A":
-        light_rgb, color_name = "0, 255, 0", "Green"
+        light_rgb = "0, 255, 0"
+        color_name = "Green"
     else:
-        light_rgb, color_name = "0, 0, 255", "Blue"
+        light_rgb = "0, 0, 255"
+        color_name = "Blue"
 
-    L = []
-    L.append('"""')
-    L.append('run_robot_' + rid + '.py  (auto-generated)')
-    L.append('=====================================================')
-    L.append('Path is embedded below - no CSV file needed.')
-    L.append('Re-run compute_path.py or use the website to regenerate.')
-    L.append('')
-    L.append('TWO WRAPPING MODES - change WRAP_MODE to swap:')
-    L.append('  "arc"      = ' + arc_cmd + ' using computed sweep angle (fast, more accurate)')
-    L.append('  "navigate" = follow reduced waypoints via navigate_to (slow, most accurate)')
-    L.append('"""')
-    L.append('')
-    L.append('from irobot_edu_sdk.backend.bluetooth import Bluetooth')
-    L.append('from irobot_edu_sdk.robots import event, Create3')
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# CONFIG')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('DIR     = "' + direction + '"')
-    L.append('CIRCLES = ' + str(circles))
-    L.append('ARC_R   = ' + str(arc_r))
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# WRAPPING MODE - CHANGE THIS TO SWAP')
-    L.append('# ==================================================================')
-    L.append('WRAP_MODE = "arc"')
-    L.append('# WRAP_MODE = "navigate"')
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# POLE POSITIONS  (local frame: world coords minus robot start)')
-    L.append('# Available for any pole-aware logic you want to add.')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('POLE_POSITIONS = ' + poles_literal)
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# EMBEDDED PATH  (' + str(len(local)) + ' waypoints, reduced for robot)')
-    L.append('# arc_deg: total sweep angle for each pole wrap (on first wrap pt)')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('PATH = ' + path_literal)
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# ROBOT DRIVER')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('robot = Create3(Bluetooth())')
-    L.append('')
-    L.append('')
-    L.append('@event(robot.when_play)')
-    L.append('async def play(robot):')
-    L.append('    await robot.reset_navigation()')
-    L.append('    await robot.set_lights_on_rgb(' + light_rgb + ')       # ' + color_name + ' = Robot ' + rid)
-    L.append('')
-    L.append('    print("Robot ' + rid + ' | dir=" + DIR + " mode=" + WRAP_MODE + " | " + str(len(PATH)) + " waypoints")')
-    L.append('')
-    L.append('    current_pole = None')
-    L.append('')
-    L.append('    for i, pt in enumerate(PATH):')
-    L.append('        if pt["type"] == "start":')
-    L.append('            continue')
-    L.append('')
-    L.append('        if pt["type"] == "move":')
-    L.append('            if pt["pole"] != current_pole:')
-    L.append('                current_pole = pt["pole"]')
-    L.append('                print("\\\\n--- Heading to Pole " + str(current_pole) + " ---")')
-    L.append('            await robot.navigate_to(pt["x"], pt["y"])')
-    L.append('')
-    L.append('        elif pt["type"] == "wrap":')
-    L.append('')
-    L.append('            # ARC MODE')
-    L.append('            if WRAP_MODE == "arc":')
-    L.append('                prev = PATH[i - 1] if i > 0 else None')
-    L.append('                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:')
-    L.append('                    await robot.set_lights_spin_rgb(255, 115, 0)')
-    L.append('                    sweep = pt.get("arc_deg", 360)')
-    L.append('                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode, " + str(round(sweep, 1)) + " deg]")')
-    L.append('                    await robot.' + arc_cmd + '(sweep, ARC_R)')
-    L.append('                    await robot.set_lights_on_rgb(' + light_rgb + ')')
-    L.append('                    print("  Done wrapping pole " + str(pt["pole"]))')
-    L.append('                continue')
-    L.append('')
-    L.append('            # NAVIGATE MODE')
-    L.append('            elif WRAP_MODE == "navigate":')
-    L.append('                prev = PATH[i - 1] if i > 0 else None')
-    L.append('                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:')
-    L.append('                    await robot.set_lights_spin_rgb(255, 115, 0)')
-    L.append('                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [navigate mode]")')
-    L.append('')
-    L.append('                await robot.navigate_to(pt["x"], pt["y"])')
-    L.append('')
-    L.append('                nxt = PATH[i + 1] if i + 1 < len(PATH) else None')
-    L.append('                if nxt is None or nxt["type"] != "wrap" or nxt["pole"] != pt["pole"]:')
-    L.append('                    await robot.set_lights_on_rgb(' + light_rgb + ')')
-    L.append('                    print("  Done wrapping pole " + str(pt["pole"]))')
-    L.append('')
-    L.append('    await robot.set_lights_blink_rgb(255, 255, 255)')
-    L.append('    await robot.play_note(440, 0.5)')
-    L.append('    await robot.play_note(880, 0.5)')
-    L.append('    await robot.stop_sound()')
-    L.append('    print("\\\\nRobot ' + rid + ' complete!")')
-    L.append('')
-    L.append('robot.play()')
-    L.append('')
-    return "\\n".join(L)
+    code = ('\"\"\"\\n'
+        'run_robot_' + rid + '.py  (auto-generated)\\n'
+        '=====================================================\\n'
+        'Path is embedded below - no CSV file needed.\\n'
+        'Re-run compute_path_' + rid + '.py or use the website to regenerate.\\n'
+        '\\n'
+        'TWO WRAPPING MODES - change WRAP_MODE to swap:\\n'
+        '  "arc"      = ' + arc_cmd + ' using computed sweep angle (fast, more accurate)\\n'
+        '  "navigate" = follow reduced waypoints via navigate_to (slow, most accurate)\\n'
+        '\"\"\"\\n'
+        '\\n'
+        'from irobot_edu_sdk.backend.bluetooth import Bluetooth\\n'
+        'from irobot_edu_sdk.robots import event, Create3\\n'
+        '\\n'
+        '# ==================================================================\\n'
+        '# CONFIG\\n'
+        '# ==================================================================\\n'
+        '\\n'
+        'DIR     = "' + direction + '"\\n'
+        'CIRCLES = ' + str(circles) + '\\n'
+        'ARC_R   = ' + str(arc_r) + '\\n'
+        '\\n'
+        '# ==================================================================\\n'
+        '# WRAPPING MODE - CHANGE THIS TO SWAP\\n'
+        '# ==================================================================\\n'
+        'WRAP_MODE = "arc"\\n'
+        '# WRAP_MODE = "navigate"\\n'
+        '\\n'
+        '# ==================================================================\\n'
+        '# EMBEDDED PATH  (' + str(len(local)) + ' waypoints, reduced for robot)\\n'
+        '# arc_deg: total sweep angle for each pole wrap (on first wrap pt)\\n'
+        '# ==================================================================\\n'
+        '\\n'
+        'PATH = ' + path_literal + '\\n'
+        '\\n'
+        '# ==================================================================\\n'
+        '# ROBOT DRIVER\\n'
+        '# ==================================================================\\n'
+        '\\n'
+        'robot = Create3(Bluetooth())\\n'
+        '\\n'
+        '@event(robot.when_play)\\n'
+        'async def play(robot):\\n'
+        '    await robot.reset_navigation()\\n'
+        '    await robot.set_lights_on_rgb(' + light_rgb + ')       # ' + color_name + ' = Robot ' + rid + '\\n'
+        '\\n'
+        '    print("Robot ' + rid + ' | dir=" + DIR + " mode=" + WRAP_MODE + " | " + str(len(PATH)) + " waypoints")\\n'
+        '\\n'
+        '    current_pole = None\\n'
+        '\\n'
+        '    for i, pt in enumerate(PATH):\\n'
+        '        if pt["type"] == "start":\\n'
+        '            continue\\n'
+        '\\n'
+        '        if pt["type"] == "move":\\n'
+        '            if pt["pole"] != current_pole:\\n'
+        '                current_pole = pt["pole"]\\n'
+        '                print("\\\\n--- Heading to Pole " + str(current_pole) + " ---")\\n'
+        '            await robot.navigate_to(pt["x"], pt["y"])\\n'
+        '\\n'
+        '        elif pt["type"] == "wrap":\\n'
+        '\\n'
+        '            # ARC MODE\\n'
+        '            if WRAP_MODE == "arc":\\n'
+        '                prev = PATH[i - 1] if i > 0 else None\\n'
+        '                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:\\n'
+        '                    await robot.set_lights_spin_rgb(255, 115, 0)\\n'
+        '                    sweep = pt.get("arc_deg", 360)\\n'
+        '                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode, " + str(round(sweep, 1)) + " deg]")\\n'
+        '                    await robot.' + arc_cmd + '(sweep, ARC_R)\\n'
+        '                    await robot.set_lights_on_rgb(' + light_rgb + ')\\n'
+        '                    print("  Done wrapping pole " + str(pt["pole"]))\\n'
+        '                    await robot.wait(15)\\n'
+        '                    await robot.wait(2.0)\\n'
+        '                continue\\n'
+        '\\n'
+        '            # NAVIGATE MODE\\n'
+        '            elif WRAP_MODE == "navigate":\\n'
+        '                prev = PATH[i - 1] if i > 0 else None\\n'
+        '                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:\\n'
+        '                    await robot.set_lights_spin_rgb(255, 115, 0)\\n'
+        '                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [navigate mode]")\\n'
+        '\\n'
+        '                await robot.navigate_to(pt["x"], pt["y"])\\n'
+        '\\n'
+        '                nxt = PATH[i + 1] if i + 1 < len(PATH) else None\\n'
+        '                if nxt is None or nxt["type"] != "wrap" or nxt["pole"] != pt["pole"]:\\n'
+        '                    await robot.set_lights_on_rgb(' + light_rgb + ')\\n'
+        '                    print("  Done wrapping pole " + str(pt["pole"]))\\n'
+        '                    await robot.wait(15)\\n'
+        '                    await robot.wait(2.0)\\n'
+        '\\n'
+        '    await robot.set_lights_blink_rgb(255, 255, 255)\\n'
+        '    await robot.play_note(440, 0.5)\\n'
+        '    await robot.play_note(880, 0.5)\\n'
+        '    await robot.stop_sound()\\n'
+        '    print("\\\\nRobot ' + rid + ' complete!")\\n'
+        '\\n'
+        'robot.play()\\n')
 
-def _extract_cfg(ns):
-    """Extract serializable config values from a namespace."""
-    out = {}
-    for k in ['POLES','POLE_R','ROBOT_R','SAFETY','ARC_R','ROBOTS','ROBOT_WRAP_STEP']:
-        if k not in ns: continue
-        v = ns[k]
-        if isinstance(v, dict):
-            nd = {}
-            for kk, vv in v.items():
-                if isinstance(vv, tuple): nd[str(kk)] = list(vv)
-                elif isinstance(vv, dict):
-                    inner = {}
-                    for ik, iv in vv.items():
-                        inner[ik] = list(iv) if isinstance(iv, tuple) else iv
-                    nd[str(kk)] = inner
-                else: nd[str(kk)] = vv
-            out[k] = nd
-        elif isinstance(v, (list, tuple)): out[k] = list(v)
-        else: out[k] = v
-    return out
+    return code
 
-def run_compute_path_unified(code_str):
-    """Execute compute_path.py and build everything for both robots."""
-    ns = {}
-    cap = io.StringIO()
-    old = sys.stdout; sys.stdout = cap
+def run_compute_path_and_extract(code_str):
+    ns={}
+    cap=io.StringIO()
+    old=sys.stdout; sys.stdout=cap
     try:
-        exec(code_str, ns)
-        sys.stdout = old; stdout_text = cap.getvalue()
-
+        exec(code_str,ns)
+        sys.stdout=old; out=cap.getvalue()
         if 'build_path' not in ns:
-            return json.dumps({"error": "No build_path(rid) found in compute_path.py",
-                               "stdout": stdout_text})
-        if 'ROBOTS' not in ns:
-            return json.dumps({"error": "No ROBOTS dict found in compute_path.py",
-                               "stdout": stdout_text})
+            return json.dumps({"error":"No build_path() found.","stdout":out})
+        wps=ns['build_path']()
+        result=[]
+        for wp in wps:
+            if isinstance(wp,dict): result.append(wp)
+            elif isinstance(wp,(list,tuple)):
+                result.append({"x":float(wp[0]),"y":float(wp[1]),
+                    "type":str(wp[2]) if len(wp)>2 else "move",
+                    "pole":int(wp[3]) if len(wp)>3 else 0,
+                    "arc_deg":0})
+        cfg={}
+        for k in ['POLES','POLE_R','ROBOT_R','SAFETY','ARC_R','START','SEQ','DIR','CIRCLES','SIGN','RID','ROBOT_WRAP_STEP']:
+            if k in ns:
+                v=ns[k]
+                if isinstance(v,dict):
+                    cfg[k]={str(kk):list(vv) if isinstance(vv,tuple) else vv for kk,vv in v.items()}
+                elif isinstance(v,(list,tuple)): cfg[k]=list(v)
+                else: cfg[k]=v
 
         wrap_step = ns.get('ROBOT_WRAP_STEP', 10)
-        cfg_all   = _extract_cfg(ns)
-        results   = {}
+        rid = ns.get('RID', 'A')
 
-        for rid in ("A", "B"):
-            wps = ns['build_path'](rid)
-            pts = []
-            for wp in wps:
-                if isinstance(wp, dict): pts.append(wp)
-                elif isinstance(wp, (list, tuple)):
-                    pts.append({"x": float(wp[0]), "y": float(wp[1]),
-                                "type": str(wp[2]) if len(wp) > 2 else "move",
-                                "pole": int(wp[3]) if len(wp) > 3 else 0,
-                                "arc_deg": 0})
-            robot_pts = _reduce_for_robot(pts, wrap_step)
+        csv_full = _pts_to_csv(result)
 
-            total = sum(
-                math.hypot(pts[i]["x"] - pts[i-1]["x"], pts[i]["y"] - pts[i-1]["y"])
-                for i in range(1, len(pts))
-            ) if len(pts) > 1 else 0
+        robot_pts = _reduce_for_robot(result, wrap_step)
+        csv_robot = _pts_to_csv(robot_pts)
 
-            results[rid] = {
-                "waypoints":       pts,
-                "csv":             _pts_to_csv(pts),
-                "csv_robot":       _pts_to_csv(robot_pts),
-                "driver_code":     _generate_driver_code(rid, robot_pts, ns),
-                "robot_pts_count": len(robot_pts),
-                "total_distance":  total,
-            }
+        driver_code = _generate_driver_code(rid, robot_pts, cfg)
 
-        return json.dumps({"results": results, "config": cfg_all, "stdout": stdout_text})
+        return json.dumps({
+            "waypoints":result,
+            "config":cfg,
+            "csv":csv_full,
+            "csv_robot":csv_robot,
+            "driver_code":driver_code,
+            "robot_pts_count":len(robot_pts),
+            "stdout":out,
+            "total_distance":sum(
+                math.hypot(result[i]["x"]-result[i-1]["x"],result[i]["y"]-result[i-1]["y"])
+                for i in range(1,len(result))
+            ) if len(result)>1 else 0
+        })
     except Exception as e:
-        sys.stdout = old; import traceback
-        return json.dumps({"error": str(e), "traceback": traceback.format_exc(),
-                           "stdout": cap.getvalue()})
+        sys.stdout=old; import traceback
+        return json.dumps({"error":str(e),"traceback":traceback.format_exc(),"stdout":cap.getvalue()})
 `);
     pyodideReady=true;
     statusEl.className='pyodide-status ready';
@@ -447,11 +409,12 @@ initPyodide();
 // ═══════════════════════════════════════════════════════
 // RUN PYTHON
 // ═══════════════════════════════════════════════════════
-async function runComputePath(){
+async function runComputePath(rid){
   if(!pyodideReady)throw new Error('Pyodide not ready');
-  if(!fileContent)throw new Error('No code for compute_path.py');
-  const esc=fileContent.replace(/\\/g,'\\\\').replace(/"""/g,'\\"\\"\\"');
-  return JSON.parse(await pyodide.runPythonAsync(`run_compute_path_unified("""${esc}""")`));
+  const code=fileContents[rid];
+  if(!code)throw new Error(`No code for compute_path_${rid}`);
+  const esc=code.replace(/\\/g,'\\\\').replace(/"""/g,'\\"\\"\\"');
+  return JSON.parse(await pyodide.runPythonAsync(`run_compute_path_and_extract("""${esc}""")`));
 }
 
 function logPyOutput(t,err=false){const el=document.getElementById('pyOutput');el.innerHTML+=`<span class="${err?'py-err':'py-ok'}">${escHtml(t)}</span>\n`;el.scrollTop=el.scrollHeight}
@@ -478,31 +441,32 @@ async function pickFolder(){
   if(!pyodideReady){alert('Pyodide still loading.');return}
   const status=document.getElementById('modalStatus');
   const found=document.getElementById('filesFound');
-  const dot=document.getElementById('dotMain'),label=document.getElementById('labelMain');
+  const dotA=document.getElementById('dotA'),dotB=document.getElementById('dotB');
+  const labelA=document.getElementById('labelA'),labelB=document.getElementById('labelB');
   try{
     dirHandle=await window.showDirectoryPicker({mode:'readwrite'});
     status.textContent='Scanning folder…'; found.classList.remove('hidden');
-    let h=null;
+    let hA=null,hB=null;
     for await(const[name,handle]of dirHandle.entries()){
       if(handle.kind!=='file')continue;
-      if(/^compute_path\.py$/i.test(name)){h=handle;break}
+      if(/^compute_path_A\.py$/i.test(name))hA=handle;
+      if(/^compute_path_B\.py$/i.test(name))hB=handle;
     }
-    if(h){
-      fileHandle=h;
-      fileContent=await(await h.getFile()).text();
-      dot.className='dot ok';label.textContent=h.name+' ✓';
-      status.textContent='File loaded! Running Python…';
-      parseConfigFromCode(fileContent);syncFormFromState();
+    if(hA){fileHandles.A=hA;fileContents.A=await(await hA.getFile()).text();dotA.className='dot ok';labelA.textContent=hA.name+' ✓'}
+    else{dotA.className='dot no';labelA.textContent='compute_path_A.py — not found'}
+    if(hB){fileHandles.B=hB;fileContents.B=await(await hB.getFile()).text();dotB.className='dot ok';labelB.textContent=hB.name+' ✓'}
+    else{dotB.className='dot no';labelB.textContent='compute_path_B.py — not found'}
+    if(hA&&hB){
+      status.textContent='Both files loaded! Running Python…';
+      parseConfigFromCode('A',fileContents.A);parseConfigFromCode('B',fileContents.B);syncFormFromState();
       setTimeout(async()=>{
         document.getElementById('startupModal').classList.add('hidden');
-        cm.setValue(fileContent);cm.refresh();
+        cm.setValue(fileContents.A);cm.refresh();
         await rebuildFromPython();
-        document.getElementById('codeStatus').innerHTML='<span class="ok">●</span> '+fileHandle.name;
+        document.getElementById('codeStatus').innerHTML='<span class="ok">●</span> '+fileHandles.A.name;
       },400);
-    }else{
-      dot.className='dot no';label.textContent='compute_path.py — not found';
-      status.textContent='compute_path.py not found in the selected folder.';
-    }
+    }else if(hA||hB){status.textContent='One file missing — check the folder.'}
+    else{status.textContent='No compute_path_A/B.py found.'}
   }catch(e){if(e.name!=='AbortError'){status.textContent='Error: '+e.message;console.error(e)}}
 }
 function reopenFolder(){document.getElementById('startupModal').classList.remove('hidden');document.getElementById('modalStatus').textContent='';document.getElementById('filesFound').classList.add('hidden')}
@@ -518,9 +482,10 @@ const cm=CodeMirror(document.getElementById('cmWrap'),{
   extraKeys:{Tab:cm=>cm.replaceSelection('    '),'Ctrl-S':()=>saveFile(),'Cmd-S':()=>saveFile()},
 });
 cm.on('change',()=>{
-  fileContent=cm.getValue();
+  fileContents[curTab]=cm.getValue();
   document.getElementById('codeLines').textContent=cm.lineCount()+' lines';
-  document.getElementById('codeStatus').innerHTML=`<span class="${fileHandle?'ok':'err'}">●</span> Modified`+(fileHandle?' — '+fileHandle.name:'');
+  const h=fileHandles[curTab];
+  document.getElementById('codeStatus').innerHTML=`<span class="${h?'ok':'err'}">●</span> Modified`+(h?' — '+h.name:'');
 });
 
 // ═══════════════════════════════════════════════════════
@@ -531,19 +496,27 @@ function swTab(t){
   document.querySelectorAll('.Pane').forEach(e=>e.classList.toggle('on',e.id==='P-'+t));
   if(t==='code'){cm.refresh();cm.focus()}
 }
+function swCode(rid){
+  curTab=rid;
+  document.querySelectorAll('.ctab').forEach(e=>e.classList.toggle('on',e.textContent.includes('_'+rid)));
+  cm.setValue(fileContents[rid]||`# No content for compute_path_${rid}`);
+  const h=fileHandles[rid];
+  document.getElementById('codeStatus').innerHTML=`<span class="${h?'ok':'err'}">●</span> ${h?h.name:'No file'}`;
+  document.getElementById('codeLines').textContent=cm.lineCount()+' lines';
+}
 
 // ═══════════════════════════════════════════════════════
 // FILE I/O
 // ═══════════════════════════════════════════════════════
-async function writeHandle(){if(!fileHandle||!fileContent)return false;try{const w=await fileHandle.createWritable();await w.write(fileContent);await w.close();return true}catch(e){console.warn('Write failed',e);return false}}
-async function saveFile(){if(!fileHandle){saveFileAs();return}const ok=await writeHandle();document.getElementById('codeStatus').innerHTML=ok?'<span class="ok">●</span> Saved '+fileHandle.name:'<span class="err">●</span> Save failed'}
-async function saveFileAs(){try{const h=await window.showSaveFilePicker({suggestedName:`compute_path.py`,types:[{description:'Python',accept:{'text/x-python':['.py']}}]});fileHandle=h;const w=await h.createWritable();await w.write(fileContent);await w.close();document.getElementById('codeStatus').innerHTML='<span class="ok">●</span> Saved '+h.name}catch(e){if(e.name!=='AbortError')console.error(e)}}
-async function applyCodeAndRebuild(){fileContent=cm.getValue();parseConfigFromCode(fileContent);syncFormFromState();await rebuildFromPython();document.getElementById('statusText').textContent='Rebuilt from Python code'}
+async function writeHandle(rid){const h=fileHandles[rid];if(!h||!fileContents[rid])return false;try{const w=await h.createWritable();await w.write(fileContents[rid]);await w.close();return true}catch(e){console.warn('Write failed',rid,e);return false}}
+async function saveFile(){if(!fileHandles[curTab]){saveFileAs();return}const ok=await writeHandle(curTab);document.getElementById('codeStatus').innerHTML=ok?'<span class="ok">●</span> Saved '+fileHandles[curTab].name:'<span class="err">●</span> Save failed'}
+async function saveFileAs(){try{const h=await window.showSaveFilePicker({suggestedName:`compute_path_${curTab}.py`,types:[{description:'Python',accept:{'text/x-python':['.py']}}]});fileHandles[curTab]=h;const w=await h.createWritable();await w.write(fileContents[curTab]);await w.close();document.getElementById('codeStatus').innerHTML='<span class="ok">●</span> Saved '+h.name}catch(e){if(e.name!=='AbortError')console.error(e)}}
+async function applyCodeAndRebuild(){fileContents[curTab]=cm.getValue();parseConfigFromCode(curTab,fileContents[curTab]);syncFormFromState();await rebuildFromPython();document.getElementById('statusText').textContent='Rebuilt from Python code'}
 
 // ═══════════════════════════════════════════════════════
 // PARSE CONFIG (regex, sidebar only)
 // ═══════════════════════════════════════════════════════
-function parseConfigFromCode(code){
+function parseConfigFromCode(rid,code){
   if(!code)return;
   try{
     const pm=code.match(/POLES\s*=\s*\{([\s\S]*?)\}/);
@@ -552,25 +525,14 @@ function parseConfigFromCode(code){
     const rr=code.match(/ROBOT_R\s*=\s*(\d+)/);if(rr)ROBOT_R=+rr[1];
     const sf=code.match(/SAFETY\s*=\s*(\d+)/);if(sf)SAFETY=+sf[1];
     ARC_R=POLE_R+ROBOT_R+SAFETY;
-
-    // Parse ROBOTS = { "A": { "start": (...), "seq": [...], "dir": "...", "circles": N }, "B": {...} }
-    const rm=code.match(/ROBOTS\s*=\s*\{([\s\S]*?)\n\}/);
-    if(rm){
-      const body=rm[1];
-      for(const rid of ['A','B']){
-        const blk=new RegExp(`["']${rid}["']\\s*:\\s*\\{([\\s\\S]*?)\\}`).exec(body);
-        if(!blk)continue;
-        const b=blk[1];
-        const st=b.match(/["']?start["']?\s*:\s*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)/);
-        const sq=b.match(/["']?seq["']?\s*:\s*\[([^\]]+)\]/);
-        const dr=b.match(/["']?dir["']?\s*:\s*["'](ccw|cw)["']/);
-        const ci=b.match(/["']?circles["']?\s*:\s*(\d+)/);
-        if(st)ROBOTS[rid].start=[+st[1],+st[2]];
-        if(sq)ROBOTS[rid].seq=sq[1].split(',').map(s=>+s.trim()).filter(n=>!isNaN(n)&&POLES[n]);
-        if(dr)ROBOTS[rid].dir=dr[1];
-        if(ci)ROBOTS[rid].circles=+ci[1];
-      }
-    }
+    const st=code.match(/START\s*=\s*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)/);
+    const sq=code.match(/SEQ\s*=\s*\[([^\]]+)\]/);
+    const dr=code.match(/DIR\s*=\s*"(ccw|cw)"/);
+    const ci=code.match(/CIRCLES\s*=\s*(\d+)/);
+    if(st)ROBOTS[rid].start=[+st[1],+st[2]];
+    if(sq)ROBOTS[rid].seq=sq[1].split(',').map(Number).filter(n=>POLES[n]);
+    if(dr)ROBOTS[rid].dir=dr[1];
+    if(ci)ROBOTS[rid].circles=+ci[1];
   }catch(e){console.warn('Parse error',e)}
 }
 function syncFormFromState(){
@@ -585,26 +547,18 @@ function syncFormFromState(){
 // ═══════════════════════════════════════════════════════
 // CONFIG → PYTHON CODE REWRITE
 // ═══════════════════════════════════════════════════════
-function rewriteConfig(code){
+function rewriteConfig(code,rid){
   const pLines=Object.entries(POLES).sort((a,b)=>+a[0]-+b[0]).map(([id,[x,y]])=>`    ${id}: (${String(x).padStart(4)}, ${String(y).padStart(4)}),`).join('\n');
-  code=code.replace(/POLES\s*=\s*\{[\s\S]*?\n\}/,`POLES = {\n${pLines}\n}`);
+  code=code.replace(/POLES\s*=\s*\{[\s\S]*?\}/,`POLES = {\n${pLines}\n}`);
   code=code.replace(/POLE_R\s*=\s*\d+/,`POLE_R  = ${POLE_R}`);
   code=code.replace(/ROBOT_R\s*=\s*\d+/,`ROBOT_R = ${ROBOT_R}`);
   code=code.replace(/SAFETY\s*=\s*\d+/,`SAFETY  = ${SAFETY}`);
-
-  // Rewrite the entire ROBOTS = { ... } block
-  const block=['ROBOTS = {'];
-  for(const rid of ['A','B']){
-    const c=ROBOTS[rid];
-    block.push(`    "${rid}": {`);
-    block.push(`        "start":   (${c.start[0]}, ${c.start[1]}),`);
-    block.push(`        "seq":     [${c.seq.join(', ')}],`);
-    block.push(`        "dir":     "${c.dir}",`);
-    block.push(`        "circles": ${c.circles},`);
-    block.push(`    },`);
-  }
-  block.push('}');
-  code=code.replace(/ROBOTS\s*=\s*\{[\s\S]*?\n\}/,block.join('\n'));
+  const c=ROBOTS[rid],sign=c.dir==='ccw'?1:-1;
+  code=code.replace(/START\s*=\s*\([^)]+\)/,`START   = (${c.start[0]}, ${c.start[1]})`);
+  code=code.replace(/SEQ\s*=\s*\[[^\]]+\]/,`SEQ     = [${c.seq.join(', ')}]`);
+  code=code.replace(/DIR\s*=\s*"[^"]+"/,`DIR     = "${c.dir}"`);
+  code=code.replace(/CIRCLES\s*=\s*\d+/,`CIRCLES = ${c.circles}`);
+  code=code.replace(/SIGN\s*=\s*-?\d+/,`SIGN    = ${sign}`);
   return code;
 }
 async function applyConfig(){
@@ -612,33 +566,23 @@ async function applyConfig(){
   POLES={};document.querySelectorAll('.pchip').forEach(el=>{POLES[+el.dataset.id]=[+el.querySelector('.px').value,+el.querySelector('.py').value]});
   ROBOTS.A={start:[+document.getElementById('aX').value,+document.getElementById('aY').value],seq:document.getElementById('aSeq').value.split(',').map(Number).filter(n=>POLES[n]),dir:document.getElementById('aDir').value,circles:+document.getElementById('aCir').value};
   ROBOTS.B={start:[+document.getElementById('bX').value,+document.getElementById('bY').value],seq:document.getElementById('bSeq').value.split(',').map(Number).filter(n=>POLES[n]),dir:document.getElementById('bDir').value,circles:+document.getElementById('bCir').value};
-  let saved=false;
-  if(fileContent){
-    fileContent=rewriteConfig(fileContent);
-    cm.setValue(fileContent);
-    if(fileHandle)saved=await writeHandle();
-  }
+  let saved=[];
+  for(const rid of['A','B']){if(fileContents[rid]){fileContents[rid]=rewriteConfig(fileContents[rid],rid);if(fileHandles[rid]&&await writeHandle(rid))saved.push(rid)}}
+  if(fileContents[curTab])cm.setValue(fileContents[curTab]);
   await rebuildFromPython();
-  document.getElementById('statusText').textContent='Config applied'+(saved?' — saved compute_path.py':'')+' — all files saved';
+  document.getElementById('statusText').textContent='Config applied'+(saved.length?' — saved '+saved.join(' & '):'')+' — all files saved';
 }
 
 // ═══════════════════════════════════════════════════════
 // SYNC STATE FROM PYTHON
 // ═══════════════════════════════════════════════════════
-function syncStateFromPythonConfig(cfg){
-  if(!cfg)return;
+function syncStateFromPythonConfig(cA,cB){
+  const cfg=cA||cB;if(!cfg)return;
   if(cfg.POLES){POLES={};for(const[k,v]of Object.entries(cfg.POLES))POLES[+k]=Array.isArray(v)?v:[v[0],v[1]]}
   if(cfg.POLE_R!==undefined)POLE_R=cfg.POLE_R;if(cfg.ROBOT_R!==undefined)ROBOT_R=cfg.ROBOT_R;if(cfg.SAFETY!==undefined)SAFETY=cfg.SAFETY;
   ARC_R=(cfg.ARC_R!==undefined)?cfg.ARC_R:POLE_R+ROBOT_R+SAFETY;
-  if(cfg.ROBOTS){
-    for(const rid of ['A','B']){
-      const r=cfg.ROBOTS[rid];if(!r)continue;
-      if(r.start)ROBOTS[rid].start=Array.isArray(r.start)?r.start:[r.start[0],r.start[1]];
-      if(r.seq)ROBOTS[rid].seq=r.seq;
-      if(r.dir)ROBOTS[rid].dir=r.dir;
-      if(r.circles!==undefined)ROBOTS[rid].circles=r.circles;
-    }
-  }
+  if(cA){if(cA.START)ROBOTS.A.start=cA.START;if(cA.SEQ)ROBOTS.A.seq=cA.SEQ;if(cA.DIR)ROBOTS.A.dir=cA.DIR;if(cA.CIRCLES!==undefined)ROBOTS.A.circles=cA.CIRCLES}
+  if(cB){if(cB.START)ROBOTS.B.start=cB.START;if(cB.SEQ)ROBOTS.B.seq=cB.SEQ;if(cB.DIR)ROBOTS.B.dir=cB.DIR;if(cB.CIRCLES!==undefined)ROBOTS.B.circles=cB.CIRCLES}
   syncFormFromState();
 }
 
@@ -651,37 +595,33 @@ async function rebuildFromPython(){
   document.getElementById('statusText').textContent='Running Python…';
   document.getElementById('badgePy').textContent='🐍 Running…';
   try{
-    const res=await runComputePath();
-    if(res.stdout)logPyOutput(res.stdout);
-    if(res.error){
-      logPyOutput('ERROR: '+res.error,true);
-      if(res.traceback)logPyOutput(res.traceback,true);
-      document.getElementById('statusText').textContent='Error in compute_path.py';
-      document.getElementById('badgePy').textContent='🐍 Error';
-      return;
-    }
+    const[resA,resB]=await Promise.all([runComputePath('A'),runComputePath('B')]);
+    if(resA.stdout)logPyOutput('Robot A stdout:\n'+resA.stdout);
+    if(resB.stdout)logPyOutput('Robot B stdout:\n'+resB.stdout);
+    if(resA.error){logPyOutput('Robot A ERROR: '+resA.error,true);if(resA.traceback)logPyOutput(resA.traceback,true);document.getElementById('statusText').textContent='Error in compute_path_A.py';document.getElementById('badgePy').textContent='🐍 Error';return}
+    if(resB.error){logPyOutput('Robot B ERROR: '+resB.error,true);if(resB.traceback)logPyOutput(resB.traceback,true);document.getElementById('statusText').textContent='Error in compute_path_B.py';document.getElementById('badgePy').textContent='🐍 Error';return}
 
-    syncStateFromPythonConfig(res.config||null);
-    const rA=res.results.A, rB=res.results.B;
-    pA=rA.waypoints.map(w=>({x:w.x,y:w.y,type:w.type,pole:w.pole}));
-    pB=rB.waypoints.map(w=>({x:w.x,y:w.y,type:w.type,pole:w.pole}));
+    syncStateFromPythonConfig(resA.config||null,resB.config||null);
+    pA=resA.waypoints.map(w=>({x:w.x,y:w.y,type:w.type,pole:w.pole}));
+    pB=resB.waypoints.map(w=>({x:w.x,y:w.y,type:w.type,pole:w.pole}));
     cA=pDist(pA);cB=pDist(pB);tA=cA[cA.length-1]||0;tB=cB[cB.length-1]||0;
     dA=0;dB=0;trA=[];trB=[];recalcView();draw();
 
     // Save all output files to project folder
-    if(rA.csv)await writeFileToDisk('path_A.csv',rA.csv);
-    if(rB.csv)await writeFileToDisk('path_B.csv',rB.csv);
-    if(rA.csv_robot)await writeFileToDisk('path_A_robot.csv',rA.csv_robot);
-    if(rB.csv_robot)await writeFileToDisk('path_B_robot.csv',rB.csv_robot);
-    if(rA.driver_code)await writeFileToDisk('run_robot_A.py',rA.driver_code);
-    if(rB.driver_code)await writeFileToDisk('run_robot_B.py',rB.driver_code);
+    if(resA.csv)await writeFileToDisk('path_A.csv',resA.csv);
+    if(resB.csv)await writeFileToDisk('path_B.csv',resB.csv);
+    if(resA.csv_robot)await writeFileToDisk('path_A_robot.csv',resA.csv_robot);
+    if(resB.csv_robot)await writeFileToDisk('path_B_robot.csv',resB.csv_robot);
+    if(resA.driver_code)await writeFileToDisk('run_robot_A.py',resA.driver_code);
+    if(resB.driver_code)await writeFileToDisk('run_robot_B.py',resB.driver_code);
 
-    logPyOutput(`✓ A: ${pA.length} wpts, ${Math.round(tA)} cm | robot: ${rA.robot_pts_count} wpts`);
-    logPyOutput(`✓ B: ${pB.length} wpts, ${Math.round(tB)} cm | robot: ${rB.robot_pts_count} wpts`);
+    const rPtsA=resA.robot_pts_count||'?', rPtsB=resB.robot_pts_count||'?';
+    logPyOutput(`✓ A: ${pA.length} wpts, ${Math.round(tA)} cm | robot: ${rPtsA} wpts`);
+    logPyOutput(`✓ B: ${pB.length} wpts, ${Math.round(tB)} cm | robot: ${rPtsB} wpts`);
     logPyOutput(`✓ Config: ${Object.keys(POLES).length} poles, ARC_R=${ARC_R}`);
     logPyOutput(`✓ A start=(${ROBOTS.A.start}) seq=[${ROBOTS.A.seq}] dir=${ROBOTS.A.dir}`);
     logPyOutput(`✓ B start=(${ROBOTS.B.start}) seq=[${ROBOTS.B.seq}] dir=${ROBOTS.B.dir}`);
-    document.getElementById('statusText').textContent=`A: ${Math.round(tA)}cm (${rA.robot_pts_count}pts)  B: ${Math.round(tB)}cm (${rB.robot_pts_count}pts) — CSV + drivers ✓`;
+    document.getElementById('statusText').textContent=`A: ${Math.round(tA)}cm (${rPtsA}pts)  B: ${Math.round(tB)}cm (${rPtsB}pts) — CSV + drivers ✓`;
     document.getElementById('badgePy').textContent='🐍 Pyodide ✓';
   }catch(e){logPyOutput('Error: '+e.message,true);document.getElementById('statusText').textContent='Python error: '+e.message;document.getElementById('badgePy').textContent='🐍 Error';console.error(e)}
 }
