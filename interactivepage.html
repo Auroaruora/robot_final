@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yarn-Wrapping Path Planner — Pyodide</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ═══════════ STARTUP MODAL ═══════════ -->
+<div class="modal-overlay" id="startupModal">
+  <div class="modal">
+    <h2>Open Project Folder</h2>
+    <p>Select the <strong>folder</strong> containing your <strong>compute_path_A.py</strong> and <strong>compute_path_B.py</strong> files.<br></p>
+    <button class="folder-btn" id="folderBtn" onclick="pickFolder()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      Choose folder
+    </button>
+    <div class="status" id="modalStatus"></div>
+    <div class="files-found hidden" id="filesFound">
+      <div class="ff"><span class="dot" id="dotA"></span><span id="labelA">compute_path_A.py</span></div>
+      <div class="ff"><span class="dot" id="dotB"></span><span id="labelB">compute_path_B.py</span></div>
+    </div>
+    <div class="pyodide-status loading" id="pyodideStatus">
+      <span class="spinner"></span> Loading Pyodide (Python runtime)…
+    </div>
+    <div class="hint">Both compute_path_*.py files must be in the selected folder.<br>Chrome or Edge required (File System Access API).<br>Python runs entirely in your browser — nothing is sent to a server.</div>
+  </div>
+</div>
+
+<!-- ═══════════ SIDEBAR ═══════════ -->
+<div class="side">
+  <div class="side-head">
+    <h1>Yarn-Wrapping Planner</h1>
+    <span class="tag">Pyodide</span>
+  </div>
+  <div class="tabs">
+    <div class="tab on" onclick="swTab('cfg')">Config</div>
+    <div class="tab" onclick="swTab('code')">Code</div>
+  </div>
+
+  <div class="Pane on" id="P-cfg">
+    <div class="cfg-scroll">
+      <div class="slbl">Poles</div>
+      <div class="pgrid" id="poleGrid"></div>
+      <div class="brow"><button class="btn full" onclick="addPole()">+ Add pole</button></div>
+      <div class="slbl">Parameters</div>
+      <div class="rw">
+        <div class="fld"><label>Pole R</label><input id="poleR" type="number" value="5"></div>
+        <div class="fld"><label>Robot R</label><input id="robotR" type="number" value="17"></div>
+        <div class="fld"><label>Safety</label><input id="safety" type="number" value="12"></div>
+      </div>
+      <div class="slbl">Robots</div>
+      <div class="rcard ra">
+        <h3>Robot A — Green</h3>
+        <div class="rw">
+          <div class="fld"><label>Start X</label><input id="aX" type="number" value="0"></div>
+          <div class="fld"><label>Start Y</label><input id="aY" type="number" value="0"></div>
+        </div>
+        <div class="fld"><label>Sequence</label><input id="aSeq" value="1,3,5,2"></div>
+        <div class="rw">
+          <div class="fld"><label>Dir</label><select id="aDir"><option value="ccw">CCW</option><option value="cw">CW</option></select></div>
+          <div class="fld"><label>Wraps</label><input id="aCir" type="number" value="0" min="0"></div>
+        </div>
+      </div>
+      <div class="rcard rb">
+        <h3>Robot B — Blue</h3>
+        <div class="rw">
+          <div class="fld"><label>Start X</label><input id="bX" type="number" value="-120"></div>
+          <div class="fld"><label>Start Y</label><input id="bY" type="number" value="160"></div>
+        </div>
+        <div class="fld"><label>Sequence</label><input id="bSeq" value="4,2,1,3"></div>
+        <div class="rw">
+          <div class="fld"><label>Dir</label><select id="bDir"><option value="cw">CW</option><option value="ccw">CCW</option></select></div>
+          <div class="fld"><label>Wraps</label><input id="bCir" type="number" value="0" min="0"></div>
+        </div>
+      </div>
+      <button class="btn pri full" onclick="applyConfig()" style="margin-top:6px">Apply &amp; Rebuild</button>
+      <p style="font-size:10px;color:var(--muted);margin-top:6px">Rewrites config, runs Python via Pyodide, saves path CSVs + run_robot driver files to disk.</p>
+    </div>
+  </div>
+
+  <div class="Pane" id="P-code">
+    <div class="code-pane">
+      <div class="ctabs">
+        <div class="ctab on" onclick="swCode('A')">compute_path_A.py</div>
+        <div class="ctab" onclick="swCode('B')">compute_path_B.py</div>
+      </div>
+      <div class="file-btns">
+        <button class="file-btn save" onclick="saveFile()">💾 Save</button>
+        <button class="file-btn" onclick="saveFileAs()">Save as…</button>
+        <button class="file-btn apply" onclick="applyCodeAndRebuild()">▶ Compile &amp; Rebuild</button>
+        <button class="file-btn reopen" onclick="reopenFolder()">📂 Re-open folder</button>
+      </div>
+      <div class="cm-wrap" id="cmWrap"></div>
+      <div class="py-output" id="pyOutput"></div>
+      <div class="code-bar">
+        <span id="codeStatus"><span class="ok">●</span> Ready</span>
+        <span id="codeLines">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ MAIN ═══════════ -->
+<div class="main">
+  <div class="cvarea">
+    <canvas id="cv"></canvas>
+    <div class="overlay">
+      <div class="badge ba" id="badgeA">A: —</div>
+      <div class="badge bb" id="badgeB">B: —</div>
+      <div class="badge bp" id="badgePy">🐍 Pyodide</div>
+    </div>
+  </div>
+  <div class="ctl">
+    <button class="pbtn" id="playBtn" onclick="togglePlay()">▶</button>
+    <div class="sctl">Spd <input type="range" id="spdSlider" min="1" max="20" value="5"></div>
+    <button class="btn sm" onclick="resetAnim()">Reset</button>
+    <div class="chip">A: <b id="statA">0</b> cm</div>
+    <div class="chip">B: <b id="statB">0</b> cm</div>
+    <div class="smsg" id="statusText">Loading Pyodide…</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+let pyodide=null, pyodideReady=false, dirHandle=null;
+let fileHandles={A:null,B:null}, fileContents={A:'',B:''}, curTab='A';
+let POLES={1:[-50,0],2:[-200,-100],3:[-120,120],4:[10,150],5:[150,-150]};
+let POLE_R=5,ROBOT_R=17,SAFETY=12,ARC_R=34;
+let ROBOTS={
+  A:{start:[0,0],seq:[1,3,5,2],dir:'ccw',circles:0},
+  B:{start:[-120,160],seq:[4,2,1,3],dir:'cw',circles:0},
+};
+
+// ═══════════════════════════════════════════════════════
+// PYODIDE INIT
+// ═══════════════════════════════════════════════════════
+async function initPyodide(){
+  const statusEl=document.getElementById('pyodideStatus');
+  try{
+    pyodide=await loadPyodide();
+    await pyodide.runPythonAsync(`
+import json,math,sys,io,types,csv as _csv
+
+def _install_mock(mod,subs=None):
+    class _A:
+        def __init__(s,*a,**k):pass
+        def __call__(s,*a,**k):return _A()
+        def __getattr__(s,n):return _A()
+        def __iter__(s):return iter([])
+        def __await__(s):
+            async def _n():return _A()
+            return _n().__await__()
+        def __bool__(s):return False
+    class _M(types.ModuleType):
+        def __getattr__(s,n):return _A()
+    m=_M(mod); m.__path__=[]; sys.modules[mod]=m
+    if subs:
+        for sub in subs:
+            s=_M(f"{mod}.{sub}"); sys.modules[f"{mod}.{sub}"]=s
+
+_install_mock('irobot_edu_sdk',['backend','backend.bluetooth','robots','music','event','getter_types','utils','completer'])
+_install_mock('bleak')
+_install_mock('serial')
+
+def _reduce_for_robot(pts, wrap_step=10):
+    robot_pts = []
+    i = 0
+    while i < len(pts):
+        p = pts[i]
+        if p["type"] != "wrap":
+            robot_pts.append(p)
+            i += 1
+            continue
+        pole = p["pole"]
+        group_start = i
+        while i < len(pts) and pts[i]["type"] == "wrap" and pts[i]["pole"] == pole:
+            i += 1
+        group = pts[group_start:i]
+        if len(group) <= 2:
+            robot_pts.extend(group)
+            continue
+        robot_pts.append(group[0])
+        for j in range(wrap_step, len(group) - 1, wrap_step):
+            robot_pts.append(group[j])
+        robot_pts.append(group[-1])
+    return robot_pts
+
+def _pts_to_csv(pts):
+    cb = io.StringIO()
+    w = _csv.writer(cb)
+    w.writerow(["step","x","y","type","pole"])
+    for i,p in enumerate(pts):
+        w.writerow([i, round(p["x"],4), round(p["y"],4), p["type"], p["pole"]])
+    return cb.getvalue()
+
+def _generate_driver_code(rid, robot_pts, cfg):
+    start = cfg.get("START", [0, 0])
+    direction = cfg.get("DIR", "ccw")
+    circles = cfg.get("CIRCLES", 1)
+    arc_r = cfg.get("ARC_R", 34)
+
+    sx, sy = start[0], start[1]
+    local = [{"x": round(p["x"] - sx, 4), "y": round(p["y"] - sy, 4),
+              "type": p["type"], "pole": p["pole"]} for p in robot_pts]
+
+    lines = []
+    for p in local:
+        lines.append('    {"x": ' + str(p["x"]) + ', "y": ' + str(p["y"]) +
+                     ', "type": "' + p["type"] + '", "pole": ' + str(p["pole"]) + '},')
+    path_literal = "[\\n" + "\\n".join(lines) + "\\n]"
+
+    arc_cmd = "arc_left" if direction == "ccw" else "arc_right"
+    if rid == "A":
+        light_rgb = "0, 255, 0"
+        color_name = "Green"
+    else:
+        light_rgb = "0, 0, 255"
+        color_name = "Blue"
+
+    code = ('\"\"\"\\n'
+        'run_robot_' + rid + '.py  (auto-generated)\\n'
+        '=====================================================\\n'
+        'Path is embedded below - no CSV file needed.\\n'
+        'Re-run compute_path_' + rid + '.py or use the website to regenerate.\\n'
+        '\\n'
+        'TWO WRAPPING MODES - change WRAP_MODE to swap:\\n'
+        '  "arc"      = single ' + arc_cmd + ' command (fast, less accurate)\\n'
+        '  "navigate" = follow reduced waypoints via navigate_to (slow, more accurate)\\n'
+        '\"\"\"\\n'
+        '\\n'
+        'from irobot_edu_sdk.backend.bluetooth import Bluetooth\\n'
+        'from irobot_edu_sdk.robots import event, Create3\\n'
+        '\\n'
+        '# ==================================================================\\n'
+        '# CONFIG\\n'
+        '# ==================================================================\\n'
+        '\\n'
+        'DIR     = "' + direction + '"\\n'
+        'CIRCLES = ' + str(circles) + '\\n'
+        'ARC_R   = ' + str(arc_r) + '\\n'
+        '\\n'
+        '# ==================================================================\\n'
+        '# WRAPPING MODE - CHANGE THIS TO SWAP\\n'
+        '# ==================================================================\\n'
+        'WRAP_MODE = "arc"\\n'
+        '# WRAP_MODE = "navigate"\\n'
+        '\\n'
+        '# ==================================================================\\n'
+        '# EMBEDDED PATH  (' + str(len(local)) + ' waypoints, reduced for robot)\\n'
+        '# ==================================================================\\n'
+        '\\n'
+        'PATH = ' + path_literal + '\\n'
+        '\\n'
+        '# ==================================================================\\n'
+        '# ROBOT DRIVER\\n'
+        '# ==================================================================\\n'
+        '\\n'
+        'robot = Create3(Bluetooth())\\n'
+        '\\n'
+        '@event(robot.when_play)\\n'
+        'async def play(robot):\\n'
+        '    await robot.reset_navigation()\\n'
+        '    await robot.set_lights_on_rgb(' + light_rgb + ')       # ' + color_name + ' = Robot ' + rid + '\\n'
+        '\\n'
+        '    print("Robot ' + rid + ' | dir=" + DIR + " mode=" + WRAP_MODE + " | " + str(len(PATH)) + " waypoints")\\n'
+        '\\n'
+        '    current_pole = None\\n'
+        '\\n'
+        '    for i, pt in enumerate(PATH):\\n'
+        '        if pt["type"] == "start":\\n'
+        '            continue\\n'
+        '\\n'
+        '        if pt["type"] == "move":\\n'
+        '            if pt["pole"] != current_pole:\\n'
+        '                current_pole = pt["pole"]\\n'
+        '                print("\\\\n--- Heading to Pole " + str(current_pole) + " ---")\\n'
+        '            await robot.navigate_to(pt["x"], pt["y"])\\n'
+        '\\n'
+        '        elif pt["type"] == "wrap":\\n'
+        '\\n'
+        '            # ARC MODE\\n'
+        '            if WRAP_MODE == "arc":\\n'
+        '                prev = PATH[i - 1] if i > 0 else None\\n'
+        '                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:\\n'
+        '                    await robot.set_lights_spin_rgb(255, 115, 0)\\n'
+        '                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode]")\\n'
+        '                    for _ in range(CIRCLES):\\n'
+        '                        await robot.' + arc_cmd + '(360, ARC_R)\\n'
+        '                    await robot.set_lights_on_rgb(' + light_rgb + ')\\n'
+        '                    print("  Done wrapping pole " + str(pt["pole"]))\\n'
+        '                    await robot.wait(15)\\n'
+        '                    await robot.wait(2.0)\\n'
+        '                continue\\n'
+        '\\n'
+        '            # NAVIGATE MODE\\n'
+        '            elif WRAP_MODE == "navigate":\\n'
+        '                prev = PATH[i - 1] if i > 0 else None\\n'
+        '                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:\\n'
+        '                    await robot.set_lights_spin_rgb(255, 115, 0)\\n'
+        '                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [navigate mode]")\\n'
+        '\\n'
+        '                await robot.navigate_to(pt["x"], pt["y"])\\n'
+        '\\n'
+        '                nxt = PATH[i + 1] if i + 1 < len(PATH) else None\\n'
+        '                if nxt is None or nxt["type"] != "wrap" or nxt["pole"] != pt["pole"]:\\n'
+        '                    await robot.set_lights_on_rgb(' + light_rgb + ')\\n'
+        '                    print("  Done wrapping pole " + str(pt["pole"]))\\n'
+        '                    await robot.wait(15)\\n'
+        '                    await robot.wait(2.0)\\n'
+        '\\n'
+        '    await robot.set_lights_blink_rgb(255, 255, 255)\\n'
+        '    await robot.play_note(440, 0.5)\\n'
+        '    await robot.play_note(880, 0.5)\\n'
+        '    await robot.stop_sound()\\n'
+        '    print("\\\\nRobot ' + rid + ' complete!")\\n'
+        '\\n'
+        'robot.play()\\n')
+
+    return code
+
+def run_compute_path_and_extract(code_str):
+    ns={}
+    cap=io.StringIO()
+    old=sys.stdout; sys.stdout=cap
+    try:
+        exec(code_str,ns)
+        sys.stdout=old; out=cap.getvalue()
+        if 'build_path' not in ns:
+            return json.dumps({"error":"No build_path() found.","stdout":out})
+        wps=ns['build_path']()
+        result=[]
+        for wp in wps:
+            if isinstance(wp,dict): result.append(wp)
+            elif isinstance(wp,(list,tuple)):
+                result.append({"x":float(wp[0]),"y":float(wp[1]),
+                    "type":str(wp[2]) if len(wp)>2 else "move",
+                    "pole":int(wp[3]) if len(wp)>3 else 0})
+        cfg={}
+        for k in ['POLES','POLE_R','ROBOT_R','SAFETY','ARC_R','START','SEQ','DIR','CIRCLES','SIGN','RID','ROBOT_WRAP_STEP']:
+            if k in ns:
+                v=ns[k]
+                if isinstance(v,dict):
+                    cfg[k]={str(kk):list(vv) if isinstance(vv,tuple) else vv for kk,vv in v.items()}
+                elif isinstance(v,(list,tuple)): cfg[k]=list(v)
+                else: cfg[k]=v
+
+        wrap_step = ns.get('ROBOT_WRAP_STEP', 10)
+        rid = ns.get('RID', 'A')
+
+        csv_full = _pts_to_csv(result)
+
+        robot_pts = _reduce_for_robot(result, wrap_step)
+        csv_robot = _pts_to_csv(robot_pts)
+
+        driver_code = _generate_driver_code(rid, robot_pts, cfg)
+
+        return json.dumps({
+            "waypoints":result,
+            "config":cfg,
+            "csv":csv_full,
+            "csv_robot":csv_robot,
+            "driver_code":driver_code,
+            "robot_pts_count":len(robot_pts),
+            "stdout":out,
+            "total_distance":sum(
+                math.hypot(result[i]["x"]-result[i-1]["x"],result[i]["y"]-result[i-1]["y"])
+                for i in range(1,len(result))
+            ) if len(result)>1 else 0
+        })
+    except Exception as e:
+        sys.stdout=old; import traceback
+        return json.dumps({"error":str(e),"traceback":traceback.format_exc(),"stdout":cap.getvalue()})
+`);
+    pyodideReady=true;
+    statusEl.className='pyodide-status ready';
+    statusEl.innerHTML='✓ Pyodide ready — Python runs in your browser';
+    document.getElementById('folderBtn').disabled=false;
+    document.getElementById('statusText').textContent='Pyodide ready — open a project folder';
+  }catch(e){
+    statusEl.className='pyodide-status error';
+    statusEl.innerHTML='✗ Failed to load Pyodide: '+e.message;
+  }
+}
+initPyodide();
+
+// ═══════════════════════════════════════════════════════
+// RUN PYTHON
+// ═══════════════════════════════════════════════════════
+async function runComputePath(rid){
+  if(!pyodideReady)throw new Error('Pyodide not ready');
+  const code=fileContents[rid];
+  if(!code)throw new Error(`No code for compute_path_${rid}`);
+  const esc=code.replace(/\\/g,'\\\\').replace(/"""/g,'\\"\\"\\"');
+  return JSON.parse(await pyodide.runPythonAsync(`run_compute_path_and_extract("""${esc}""")`));
+}
+
+function logPyOutput(t,err=false){const el=document.getElementById('pyOutput');el.innerHTML+=`<span class="${err?'py-err':'py-ok'}">${escHtml(t)}</span>\n`;el.scrollTop=el.scrollHeight}
+function clearPyOutput(){document.getElementById('pyOutput').innerHTML=''}
+function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+// ═══════════════════════════════════════════════════════
+// WRITE FILE TO DISK
+// ═══════════════════════════════════════════════════════
+async function writeFileToDisk(filename,text){
+  if(!dirHandle)return false;
+  try{
+    const h=await dirHandle.getFileHandle(filename,{create:true});
+    const w=await h.createWritable(); await w.write(text); await w.close();
+    logPyOutput(`✓ Saved ${filename}`);
+    return true;
+  }catch(e){logPyOutput(`⚠ Could not save ${filename}: ${e.message}`,true);return false}
+}
+
+// ═══════════════════════════════════════════════════════
+// FOLDER PICKER
+// ═══════════════════════════════════════════════════════
+async function pickFolder(){
+  if(!pyodideReady){alert('Pyodide still loading.');return}
+  const status=document.getElementById('modalStatus');
+  const found=document.getElementById('filesFound');
+  const dotA=document.getElementById('dotA'),dotB=document.getElementById('dotB');
+  const labelA=document.getElementById('labelA'),labelB=document.getElementById('labelB');
+  try{
+    dirHandle=await window.showDirectoryPicker({mode:'readwrite'});
+    status.textContent='Scanning folder…'; found.classList.remove('hidden');
+    let hA=null,hB=null;
+    for await(const[name,handle]of dirHandle.entries()){
+      if(handle.kind!=='file')continue;
+      if(/^compute_path_A\.py$/i.test(name))hA=handle;
+      if(/^compute_path_B\.py$/i.test(name))hB=handle;
+    }
+    if(hA){fileHandles.A=hA;fileContents.A=await(await hA.getFile()).text();dotA.className='dot ok';labelA.textContent=hA.name+' ✓'}
+    else{dotA.className='dot no';labelA.textContent='compute_path_A.py — not found'}
+    if(hB){fileHandles.B=hB;fileContents.B=await(await hB.getFile()).text();dotB.className='dot ok';labelB.textContent=hB.name+' ✓'}
+    else{dotB.className='dot no';labelB.textContent='compute_path_B.py — not found'}
+    if(hA&&hB){
+      status.textContent='Both files loaded! Running Python…';
+      parseConfigFromCode('A',fileContents.A);parseConfigFromCode('B',fileContents.B);syncFormFromState();
+      setTimeout(async()=>{
+        document.getElementById('startupModal').classList.add('hidden');
+        cm.setValue(fileContents.A);cm.refresh();
+        await rebuildFromPython();
+        document.getElementById('codeStatus').innerHTML='<span class="ok">●</span> '+fileHandles.A.name;
+      },400);
+    }else if(hA||hB){status.textContent='One file missing — check the folder.'}
+    else{status.textContent='No compute_path_A/B.py found.'}
+  }catch(e){if(e.name!=='AbortError'){status.textContent='Error: '+e.message;console.error(e)}}
+}
+function reopenFolder(){document.getElementById('startupModal').classList.remove('hidden');document.getElementById('modalStatus').textContent='';document.getElementById('filesFound').classList.add('hidden')}
+
+// ═══════════════════════════════════════════════════════
+// CODEMIRROR
+// ═══════════════════════════════════════════════════════
+const cm=CodeMirror(document.getElementById('cmWrap'),{
+  value:'# Open a project folder to load Python files…\n',
+  mode:'python',theme:'dracula',lineNumbers:true,
+  matchBrackets:true,autoCloseBrackets:true,styleActiveLine:true,
+  indentUnit:4,tabSize:4,indentWithTabs:false,
+  extraKeys:{Tab:cm=>cm.replaceSelection('    '),'Ctrl-S':()=>saveFile(),'Cmd-S':()=>saveFile()},
+});
+cm.on('change',()=>{
+  fileContents[curTab]=cm.getValue();
+  document.getElementById('codeLines').textContent=cm.lineCount()+' lines';
+  const h=fileHandles[curTab];
+  document.getElementById('codeStatus').innerHTML=`<span class="${h?'ok':'err'}">●</span> Modified`+(h?' — '+h.name:'');
+});
+
+// ═══════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════
+function swTab(t){
+  document.querySelectorAll('.tabs .tab').forEach((e,i)=>e.classList.toggle('on',i===(t==='cfg'?0:1)));
+  document.querySelectorAll('.Pane').forEach(e=>e.classList.toggle('on',e.id==='P-'+t));
+  if(t==='code'){cm.refresh();cm.focus()}
+}
+function swCode(rid){
+  curTab=rid;
+  document.querySelectorAll('.ctab').forEach(e=>e.classList.toggle('on',e.textContent.includes('_'+rid)));
+  cm.setValue(fileContents[rid]||`# No content for compute_path_${rid}`);
+  const h=fileHandles[rid];
+  document.getElementById('codeStatus').innerHTML=`<span class="${h?'ok':'err'}">●</span> ${h?h.name:'No file'}`;
+  document.getElementById('codeLines').textContent=cm.lineCount()+' lines';
+}
+
+// ═══════════════════════════════════════════════════════
+// FILE I/O
+// ═══════════════════════════════════════════════════════
+async function writeHandle(rid){const h=fileHandles[rid];if(!h||!fileContents[rid])return false;try{const w=await h.createWritable();await w.write(fileContents[rid]);await w.close();return true}catch(e){console.warn('Write failed',rid,e);return false}}
+async function saveFile(){if(!fileHandles[curTab]){saveFileAs();return}const ok=await writeHandle(curTab);document.getElementById('codeStatus').innerHTML=ok?'<span class="ok">●</span> Saved '+fileHandles[curTab].name:'<span class="err">●</span> Save failed'}
+async function saveFileAs(){try{const h=await window.showSaveFilePicker({suggestedName:`compute_path_${curTab}.py`,types:[{description:'Python',accept:{'text/x-python':['.py']}}]});fileHandles[curTab]=h;const w=await h.createWritable();await w.write(fileContents[curTab]);await w.close();document.getElementById('codeStatus').innerHTML='<span class="ok">●</span> Saved '+h.name}catch(e){if(e.name!=='AbortError')console.error(e)}}
+async function applyCodeAndRebuild(){fileContents[curTab]=cm.getValue();parseConfigFromCode(curTab,fileContents[curTab]);syncFormFromState();await rebuildFromPython();document.getElementById('statusText').textContent='Rebuilt from Python code'}
+
+// ═══════════════════════════════════════════════════════
+// PARSE CONFIG (regex, sidebar only)
+// ═══════════════════════════════════════════════════════
+function parseConfigFromCode(rid,code){
+  if(!code)return;
+  try{
+    const pm=code.match(/POLES\s*=\s*\{([\s\S]*?)\}/);
+    if(pm){const p={};let m;const re=/(\d+)\s*:\s*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)/g;while((m=re.exec(pm[1]))!==null)p[+m[1]]=[+m[2],+m[3]];if(Object.keys(p).length)POLES=p}
+    const pr=code.match(/POLE_R\s*=\s*(\d+)/);if(pr)POLE_R=+pr[1];
+    const rr=code.match(/ROBOT_R\s*=\s*(\d+)/);if(rr)ROBOT_R=+rr[1];
+    const sf=code.match(/SAFETY\s*=\s*(\d+)/);if(sf)SAFETY=+sf[1];
+    ARC_R=POLE_R+ROBOT_R+SAFETY;
+    const st=code.match(/START\s*=\s*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)/);
+    const sq=code.match(/SEQ\s*=\s*\[([^\]]+)\]/);
+    const dr=code.match(/DIR\s*=\s*"(ccw|cw)"/);
+    const ci=code.match(/CIRCLES\s*=\s*(\d+)/);
+    if(st)ROBOTS[rid].start=[+st[1],+st[2]];
+    if(sq)ROBOTS[rid].seq=sq[1].split(',').map(Number).filter(n=>POLES[n]);
+    if(dr)ROBOTS[rid].dir=dr[1];
+    if(ci)ROBOTS[rid].circles=+ci[1];
+  }catch(e){console.warn('Parse error',e)}
+}
+function syncFormFromState(){
+  renderPoleGrid();
+  document.getElementById('poleR').value=POLE_R;document.getElementById('robotR').value=ROBOT_R;document.getElementById('safety').value=SAFETY;
+  document.getElementById('aX').value=ROBOTS.A.start[0];document.getElementById('aY').value=ROBOTS.A.start[1];
+  document.getElementById('aSeq').value=ROBOTS.A.seq.join(',');document.getElementById('aDir').value=ROBOTS.A.dir;document.getElementById('aCir').value=ROBOTS.A.circles;
+  document.getElementById('bX').value=ROBOTS.B.start[0];document.getElementById('bY').value=ROBOTS.B.start[1];
+  document.getElementById('bSeq').value=ROBOTS.B.seq.join(',');document.getElementById('bDir').value=ROBOTS.B.dir;document.getElementById('bCir').value=ROBOTS.B.circles;
+}
+
+// ═══════════════════════════════════════════════════════
+// CONFIG → PYTHON CODE REWRITE
+// ═══════════════════════════════════════════════════════
+function rewriteConfig(code,rid){
+  const pLines=Object.entries(POLES).sort((a,b)=>+a[0]-+b[0]).map(([id,[x,y]])=>`    ${id}: (${String(x).padStart(4)}, ${String(y).padStart(4)}),`).join('\n');
+  code=code.replace(/POLES\s*=\s*\{[\s\S]*?\}/,`POLES = {\n${pLines}\n}`);
+  code=code.replace(/POLE_R\s*=\s*\d+/,`POLE_R  = ${POLE_R}`);
+  code=code.replace(/ROBOT_R\s*=\s*\d+/,`ROBOT_R = ${ROBOT_R}`);
+  code=code.replace(/SAFETY\s*=\s*\d+/,`SAFETY  = ${SAFETY}`);
+  const c=ROBOTS[rid],sign=c.dir==='ccw'?1:-1;
+  code=code.replace(/START\s*=\s*\([^)]+\)/,`START   = (${c.start[0]}, ${c.start[1]})`);
+  code=code.replace(/SEQ\s*=\s*\[[^\]]+\]/,`SEQ     = [${c.seq.join(', ')}]`);
+  code=code.replace(/DIR\s*=\s*"[^"]+"/,`DIR     = "${c.dir}"`);
+  code=code.replace(/CIRCLES\s*=\s*\d+/,`CIRCLES = ${c.circles}`);
+  code=code.replace(/SIGN\s*=\s*-?\d+/,`SIGN    = ${sign}`);
+  return code;
+}
+async function applyConfig(){
+  POLE_R=+document.getElementById('poleR').value;ROBOT_R=+document.getElementById('robotR').value;SAFETY=+document.getElementById('safety').value;ARC_R=POLE_R+ROBOT_R+SAFETY;
+  POLES={};document.querySelectorAll('.pchip').forEach(el=>{POLES[+el.dataset.id]=[+el.querySelector('.px').value,+el.querySelector('.py').value]});
+  ROBOTS.A={start:[+document.getElementById('aX').value,+document.getElementById('aY').value],seq:document.getElementById('aSeq').value.split(',').map(Number).filter(n=>POLES[n]),dir:document.getElementById('aDir').value,circles:+document.getElementById('aCir').value};
+  ROBOTS.B={start:[+document.getElementById('bX').value,+document.getElementById('bY').value],seq:document.getElementById('bSeq').value.split(',').map(Number).filter(n=>POLES[n]),dir:document.getElementById('bDir').value,circles:+document.getElementById('bCir').value};
+  let saved=[];
+  for(const rid of['A','B']){if(fileContents[rid]){fileContents[rid]=rewriteConfig(fileContents[rid],rid);if(fileHandles[rid]&&await writeHandle(rid))saved.push(rid)}}
+  if(fileContents[curTab])cm.setValue(fileContents[curTab]);
+  await rebuildFromPython();
+  document.getElementById('statusText').textContent='Config applied'+(saved.length?' — saved '+saved.join(' & '):'')+' — all files saved';
+}
+
+// ═══════════════════════════════════════════════════════
+// SYNC STATE FROM PYTHON
+// ═══════════════════════════════════════════════════════
+function syncStateFromPythonConfig(cA,cB){
+  const cfg=cA||cB;if(!cfg)return;
+  if(cfg.POLES){POLES={};for(const[k,v]of Object.entries(cfg.POLES))POLES[+k]=Array.isArray(v)?v:[v[0],v[1]]}
+  if(cfg.POLE_R!==undefined)POLE_R=cfg.POLE_R;if(cfg.ROBOT_R!==undefined)ROBOT_R=cfg.ROBOT_R;if(cfg.SAFETY!==undefined)SAFETY=cfg.SAFETY;
+  ARC_R=(cfg.ARC_R!==undefined)?cfg.ARC_R:POLE_R+ROBOT_R+SAFETY;
+  if(cA){if(cA.START)ROBOTS.A.start=cA.START;if(cA.SEQ)ROBOTS.A.seq=cA.SEQ;if(cA.DIR)ROBOTS.A.dir=cA.DIR;if(cA.CIRCLES!==undefined)ROBOTS.A.circles=cA.CIRCLES}
+  if(cB){if(cB.START)ROBOTS.B.start=cB.START;if(cB.SEQ)ROBOTS.B.seq=cB.SEQ;if(cB.DIR)ROBOTS.B.dir=cB.DIR;if(cB.CIRCLES!==undefined)ROBOTS.B.circles=cB.CIRCLES}
+  syncFormFromState();
+}
+
+// ═══════════════════════════════════════════════════════
+// REBUILD FROM PYTHON + SAVE ALL FILES
+// ═══════════════════════════════════════════════════════
+async function rebuildFromPython(){
+  playing=false;if(aId)cancelAnimationFrame(aId);
+  document.getElementById('playBtn').textContent='▶';clearPyOutput();
+  document.getElementById('statusText').textContent='Running Python…';
+  document.getElementById('badgePy').textContent='🐍 Running…';
+  try{
+    const[resA,resB]=await Promise.all([runComputePath('A'),runComputePath('B')]);
+    if(resA.stdout)logPyOutput('Robot A stdout:\n'+resA.stdout);
+    if(resB.stdout)logPyOutput('Robot B stdout:\n'+resB.stdout);
+    if(resA.error){logPyOutput('Robot A ERROR: '+resA.error,true);if(resA.traceback)logPyOutput(resA.traceback,true);document.getElementById('statusText').textContent='Error in compute_path_A.py';document.getElementById('badgePy').textContent='🐍 Error';return}
+    if(resB.error){logPyOutput('Robot B ERROR: '+resB.error,true);if(resB.traceback)logPyOutput(resB.traceback,true);document.getElementById('statusText').textContent='Error in compute_path_B.py';document.getElementById('badgePy').textContent='🐍 Error';return}
+
+    syncStateFromPythonConfig(resA.config||null,resB.config||null);
+    pA=resA.waypoints.map(w=>({x:w.x,y:w.y,type:w.type,pole:w.pole}));
+    pB=resB.waypoints.map(w=>({x:w.x,y:w.y,type:w.type,pole:w.pole}));
+    cA=pDist(pA);cB=pDist(pB);tA=cA[cA.length-1]||0;tB=cB[cB.length-1]||0;
+    dA=0;dB=0;trA=[];trB=[];recalcView();draw();
+
+    // Save all output files to project folder
+    if(resA.csv)await writeFileToDisk('path_A.csv',resA.csv);
+    if(resB.csv)await writeFileToDisk('path_B.csv',resB.csv);
+    if(resA.csv_robot)await writeFileToDisk('path_A_robot.csv',resA.csv_robot);
+    if(resB.csv_robot)await writeFileToDisk('path_B_robot.csv',resB.csv_robot);
+    if(resA.driver_code)await writeFileToDisk('run_robot_A.py',resA.driver_code);
+    if(resB.driver_code)await writeFileToDisk('run_robot_B.py',resB.driver_code);
+
+    const rPtsA=resA.robot_pts_count||'?', rPtsB=resB.robot_pts_count||'?';
+    logPyOutput(`✓ A: ${pA.length} wpts, ${Math.round(tA)} cm | robot: ${rPtsA} wpts`);
+    logPyOutput(`✓ B: ${pB.length} wpts, ${Math.round(tB)} cm | robot: ${rPtsB} wpts`);
+    logPyOutput(`✓ Config: ${Object.keys(POLES).length} poles, ARC_R=${ARC_R}`);
+    logPyOutput(`✓ A start=(${ROBOTS.A.start}) seq=[${ROBOTS.A.seq}] dir=${ROBOTS.A.dir}`);
+    logPyOutput(`✓ B start=(${ROBOTS.B.start}) seq=[${ROBOTS.B.seq}] dir=${ROBOTS.B.dir}`);
+    document.getElementById('statusText').textContent=`A: ${Math.round(tA)}cm (${rPtsA}pts)  B: ${Math.round(tB)}cm (${rPtsB}pts) — CSV + drivers ✓`;
+    document.getElementById('badgePy').textContent='🐍 Pyodide ✓';
+  }catch(e){logPyOutput('Error: '+e.message,true);document.getElementById('statusText').textContent='Python error: '+e.message;document.getElementById('badgePy').textContent='🐍 Error';console.error(e)}
+}
+
+// ═══════════════════════════════════════════════════════
+// POLE GRID
+// ═══════════════════════════════════════════════════════
+function getMaxPoleId(){const ids=Object.keys(POLES).map(Number);return ids.length?Math.max(...ids):0}
+function renderPoleGrid(){const g=document.getElementById('poleGrid');g.innerHTML='';const mx=getMaxPoleId();for(const[id,[x,y]]of Object.entries(POLES).sort((a,b)=>+a[0]-+b[0])){const el=document.createElement('div');el.className='pchip';el.dataset.id=id;const cd=(+id===mx);el.innerHTML=`<span class="dot"></span><b>${id}</b><input class="px" value="${x}" title="X"><input class="py" value="${y}" title="Y">`+(cd?`<span class="del" onclick="delPole(${id})" title="Remove">×</span>`:`<span style="width:11px"></span>`);g.appendChild(el)}}
+function addPole(){POLES[getMaxPoleId()+1]=[0,0];renderPoleGrid()}
+function delPole(id){if(+id!==getMaxPoleId())return;delete POLES[id];for(const rid of['A','B']){const s=document.getElementById(rid==='A'?'aSeq':'bSeq');s.value=s.value.split(',').map(s=>s.trim()).filter(s=>+s!==+id).join(',')}renderPoleGrid()}
+
+// ═══════════════════════════════════════════════════════
+// JS HELPERS (animation only)
+// ═══════════════════════════════════════════════════════
+function dd(x1,y1,x2,y2){return Math.hypot(x2-x1,y2-y1)}
+function pDist(pts){let c=[0];for(let i=1;i<pts.length;i++)c.push(c[i-1]+dd(pts[i-1].x,pts[i-1].y,pts[i].x,pts[i].y));return c}
+function pAt(pts,c,d){d=Math.max(0,Math.min(d,c[c.length-1]));for(let i=1;i<c.length;i++){if(d<=c[i]){let s=c[i]-c[i-1],t=s>0?(d-c[i-1])/s:0;return{x:pts[i-1].x+(pts[i].x-pts[i-1].x)*t,y:pts[i-1].y+(pts[i].y-pts[i-1].y)*t,seg:pts[i]}}}let l=pts[pts.length-1];return{x:l.x,y:l.y,seg:l}}
+
+// ═══════════════════════════════════════════════════════
+// CANVAS
+// ═══════════════════════════════════════════════════════
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+let W,H,pA=[],pB=[],cA=[],cB=[],tA=0,tB=0,dA=0,dB=0,trA=[],trB=[],playing=false,aId=null;
+const CA='#2b9e4f',CB='#2872cc',CP='#c95428';
+let vCx=0,vCy=0,vS=1.8;
+
+function recalcView(){let ax=[],ay=[];for(let p of Object.values(POLES)){ax.push(p[0]);ay.push(p[1])}for(let r of Object.values(ROBOTS)){ax.push(r.start[0]);ay.push(r.start[1])}for(let p of pA){ax.push(p.x);ay.push(p.y)}for(let p of pB){ax.push(p.x);ay.push(p.y)}if(!ax.length)return;let pad=70,x0=Math.min(...ax)-pad,x1=Math.max(...ax)+pad,y0=Math.min(...ay)-pad,y1=Math.max(...ay)+pad;vCx=(x0+x1)/2;vCy=(y0+y1)/2;vS=Math.min(W/(x1-x0),H/(y1-y0))*.92}
+function toS(wx,wy){return[W/2+(wx-vCx)*vS,H/2-(wy-vCy)*vS]}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#f2f1ed';ctx.lineWidth=.5;
+  for(let wx=-500;wx<=500;wx+=50){let[sx]=toS(wx,0);ctx.beginPath();ctx.moveTo(sx,0);ctx.lineTo(sx,H);ctx.stroke()}
+  for(let wy=-400;wy<=400;wy+=50){let[,sy]=toS(0,wy);ctx.beginPath();ctx.moveTo(0,sy);ctx.lineTo(W,sy);ctx.stroke()}
+  let[ox,oy]=toS(0,0);ctx.strokeStyle='#d8d5cc';ctx.lineWidth=.8;ctx.beginPath();ctx.moveTo(0,oy);ctx.lineTo(W,oy);ctx.stroke();ctx.beginPath();ctx.moveTo(ox,0);ctx.lineTo(ox,H);ctx.stroke();
+  for(let[pid,p]of Object.entries(POLES)){let[sx,sy]=toS(p[0],p[1]),ar=ARC_R*vS,pr=Math.max(POLE_R*vS,3);ctx.beginPath();ctx.arc(sx,sy,ar,0,Math.PI*2);ctx.fillStyle='rgba(201,84,40,.04)';ctx.fill();ctx.strokeStyle='rgba(201,84,40,.18)';ctx.lineWidth=.7;ctx.setLineDash([3,3]);ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(sx,sy,pr,0,Math.PI*2);ctx.fillStyle=CP;ctx.fill();ctx.fillStyle='#fff';ctx.font='bold 10px "IBM Plex Sans"';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(pid,sx,sy)}
+  for(let[rid,cfg]of Object.entries(ROBOTS)){let[sx,sy]=toS(cfg.start[0],cfg.start[1]),col=rid==='A'?CA:CB;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(sx-5,sy-5);ctx.lineTo(sx+5,sy+5);ctx.stroke();ctx.beginPath();ctx.moveTo(sx+5,sy-5);ctx.lineTo(sx-5,sy+5);ctx.stroke();ctx.fillStyle=col;ctx.font='600 9px "IBM Plex Sans"';ctx.textAlign='left';ctx.fillText(rid+' start',sx+9,sy+3)}
+  function ghost(pts,col){if(pts.length<2)return;ctx.strokeStyle=col;ctx.globalAlpha=.08;ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(...toS(pts[0].x,pts[0].y));for(let i=1;i<pts.length;i++)ctx.lineTo(...toS(pts[i].x,pts[i].y));ctx.stroke();ctx.globalAlpha=1}
+  ghost(pA,CA);ghost(pB,CB);
+  function trail(tr,col){if(tr.length<2)return;ctx.strokeStyle=col;ctx.globalAlpha=.22;ctx.lineWidth=1.8;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(...toS(tr[0][0],tr[0][1]));for(let i=1;i<tr.length;i++)ctx.lineTo(...toS(tr[i][0],tr[i][1]));ctx.stroke();ctx.globalAlpha=1;let t=tr.slice(-60);if(t.length>1){ctx.strokeStyle=col;ctx.lineWidth=2.8;ctx.beginPath();ctx.moveTo(...toS(t[0][0],t[0][1]));for(let i=1;i<t.length;i++)ctx.lineTo(...toS(t[i][0],t[i][1]));ctx.stroke()}}
+  trail(trA,CA);trail(trB,CB);
+  function bot(pts,cum,d,col,lbl){if(!pts.length||d<0)return null;let{x,y,seg}=pAt(pts,cum,d);let[sx,sy]=toS(x,y),r=Math.max(ROBOT_R*vS*.45,6);ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.fillStyle=col;ctx.globalAlpha=.25;ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#fff';ctx.font='bold 9px "IBM Plex Sans"';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(lbl,sx,sy);return seg}
+  let sA=bot(pA,cA,dA,CA,'A'),sB=bot(pB,cB,dB,CB,'B');
+  document.getElementById('badgeA').textContent=sA?(sA.type==='wrap'?`A: wrap ${sA.pole}`:`A: → ${sA.pole}`):'A: —';
+  document.getElementById('badgeB').textContent=sB?(sB.type==='wrap'?`B: wrap ${sB.pole}`:`B: → ${sB.pole}`):'B: —';
+  document.getElementById('statA').textContent=Math.round(dA);document.getElementById('statB').textContent=Math.round(dB);
+}
+
+function resize(){let r=cv.parentElement.getBoundingClientRect();cv.width=r.width*devicePixelRatio;cv.height=r.height*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);W=r.width;H=r.height;recalcView();draw()}
+function animate(){let spd=+document.getElementById('spdSlider').value,cm_=spd*.9;if(dA<tA){dA=Math.min(dA+cm_,tA);let p=pAt(pA,cA,dA);trA.push([p.x,p.y])}if(dB<tB){dB=Math.min(dB+cm_,tB);let p=pAt(pB,cB,dB);trB.push([p.x,p.y])}draw();if(dA>=tA&&dB>=tB){playing=false;document.getElementById('playBtn').textContent='▶';document.getElementById('statusText').textContent='Complete ✓';return}if(playing)aId=requestAnimationFrame(animate)}
+function togglePlay(){if(!pA.length&&!pB.length)return;playing=!playing;document.getElementById('playBtn').textContent=playing?'⏸':'▶';if(playing)aId=requestAnimationFrame(animate);else if(aId)cancelAnimationFrame(aId)}
+function resetAnim(){playing=false;if(aId)cancelAnimationFrame(aId);document.getElementById('playBtn').textContent='▶';dA=0;dB=0;trA=[];trB=[];draw()}
+
+renderPoleGrid();window.addEventListener('resize',resize);resize();draw();
+</script>
+</body>
+</html>
