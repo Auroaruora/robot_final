@@ -25,7 +25,7 @@ POLES = {
 
 POLE_R  = 5
 ROBOT_R = 33
-SAFETY  = 12
+SAFETY  = 20
 ARC_R   = POLE_R + ROBOT_R + SAFETY
 
 # ==================================================================
@@ -145,12 +145,13 @@ def arc_points(cx, cy, r, entry_ang, exit_ang, wrap_sign,
         partial = -raw if raw < 0 else -(raw - 2 * math.pi)
         partial = abs(partial)
     total = n_full_circles * 2 * math.pi + partial
+    total_deg = math.degrees(total)
     n = max(steps_per_circle, int(total / (2 * math.pi) * steps_per_circle))
     pts = []
     for i in range(1, n + 1):
         a = entry_ang + wrap_sign * (i / n) * total
         pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
-    return pts
+    return pts, total_deg
 
 # ==================================================================
 # PATH BUILDER  (called by the website via Pyodide)
@@ -158,7 +159,7 @@ def arc_points(cx, cy, r, entry_ang, exit_ang, wrap_sign,
 
 def build_path():
     sx, sy = START
-    pts = [{"x": sx, "y": sy, "type": "start", "pole": 0}]
+    pts = [{"x": sx, "y": sy, "type": "start", "pole": 0, "arc_deg": 0}]
     n = len(SEQ)
 
     entries = {}
@@ -194,15 +195,18 @@ def build_path():
             skip.add(SEQ[idx - 1])
         route = safe_transit(cx, cy, entry[0], entry[1], skip)
         for (wx, wy) in route:
-            pts.append({"x": wx, "y": wy, "type": "move", "pole": pid})
+            pts.append({"x": wx, "y": wy, "type": "move", "pole": pid, "arc_deg": 0})
             cx, cy = wx, wy
 
         entry_ang = math.atan2(entry[1] - py, entry[0] - px)
         exit_ang  = math.atan2(exit_pt[1] - py, exit_pt[0] - px)
-        arc = arc_points(px, py, ARC_R, entry_ang, exit_ang, SIGN,
+        arc, arc_deg = arc_points(px, py, ARC_R, entry_ang, exit_ang, SIGN,
                          n_full_circles=CIRCLES)
-        for (ax, ay) in arc:
-            pts.append({"x": ax, "y": ay, "type": "wrap", "pole": pid})
+        for j, (ax, ay) in enumerate(arc):
+            wp = {"x": ax, "y": ay, "type": "wrap", "pole": pid, "arc_deg": 0}
+            if j == 0:
+                wp["arc_deg"] = round(arc_deg, 2)
+            pts.append(wp)
         cx, cy = exit_pt
 
     return pts
@@ -216,9 +220,9 @@ def save_csv(pts, filename="path_B.csv"):
     filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
     with open(filepath, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["step", "x", "y", "type", "pole"])
+        w.writerow(["step", "x", "y", "type", "pole", "arc_deg"])
         for i, p in enumerate(pts):
-            w.writerow([i, round(p["x"], 4), round(p["y"], 4), p["type"], p["pole"]])
+            w.writerow([i, round(p["x"], 4), round(p["y"], 4), p["type"], p["pole"], p.get("arc_deg", 0)])
     return filepath
 
 # ==================================================================

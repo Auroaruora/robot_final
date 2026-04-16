@@ -5,8 +5,8 @@ Path is embedded below - no CSV file needed.
 Re-run compute_path_A.py or use the website to regenerate.
 
 TWO WRAPPING MODES - change WRAP_MODE to swap:
-  "arc"      = single arc_left command (fast, less accurate)
-  "navigate" = follow reduced waypoints via navigate_to (slow, more accurate)
+  "arc"      = arc_left using computed sweep angle (fast, more accurate)
+  "navigate" = follow reduced waypoints via navigate_to (slow, most accurate)
 """
 
 from irobot_edu_sdk.backend.bluetooth import Bluetooth
@@ -18,7 +18,7 @@ from irobot_edu_sdk.robots import event, Create3
 
 DIR     = "ccw"
 CIRCLES = 1
-ARC_R   = 50
+ARC_R   = 58
 
 # ==================================================================
 # WRAPPING MODE - CHANGE THIS TO SWAP
@@ -28,101 +28,102 @@ WRAP_MODE = "arc"
 
 # ==================================================================
 # EMBEDDED PATH  (92 waypoints, reduced for robot)
+# arc_deg: total sweep angle for each pole wrap (on first wrap pt)
 # ==================================================================
 
 PATH = [
-    {"x": 0, "y": 0, "type": "start", "pole": 0},
-    {"x": 37.2678, "y": 41.6667, "type": "move", "pole": 1},
-    {"x": 38.9637, "y": 43.6658, "type": "wrap", "pole": 1},
-    {"x": 49.4165, "y": 67.3838, "type": "wrap", "pole": 1},
-    {"x": 46.5901, "y": 93.1484, "type": "wrap", "pole": 1},
-    {"x": 31.2439, "y": 114.0361, "type": "wrap", "pole": 1},
-    {"x": 7.5017, "y": 124.434, "type": "wrap", "pole": 1},
-    {"x": -18.2563, "y": 121.5479, "type": "wrap", "pole": 1},
-    {"x": -39.1084, "y": 106.1534, "type": "wrap", "pole": 1},
-    {"x": -49.4513, "y": 82.3872, "type": "wrap", "pole": 1},
-    {"x": -46.5055, "y": 56.636, "type": "wrap", "pole": 1},
-    {"x": -31.0627, "y": 35.8195, "type": "wrap", "pole": 1},
-    {"x": -7.2727, "y": 25.5317, "type": "wrap", "pole": 1},
-    {"x": 18.4717, "y": 28.5371, "type": "wrap", "pole": 1},
-    {"x": 39.2523, "y": 44.0281, "type": "wrap", "pole": 1},
-    {"x": 49.485, "y": 67.8419, "type": "wrap", "pole": 1},
-    {"x": 46.4199, "y": 93.5793, "type": "wrap", "pole": 1},
-    {"x": 30.8809, "y": 114.3239, "type": "wrap", "pole": 1},
-    {"x": 7.0434, "y": 124.5014, "type": "wrap", "pole": 1},
-    {"x": -18.6867, "y": 121.3768, "type": "wrap", "pole": 1},
-    {"x": -39.3954, "y": 105.7897, "type": "wrap", "pole": 1},
-    {"x": -46.9897, "y": 92.0872, "type": "wrap", "pole": 1},
-    {"x": -146.9897, "y": -182.9128, "type": "move", "pole": 2},
-    {"x": -147.8195, "y": -185.3955, "type": "wrap", "pole": 2},
-    {"x": -148.7152, "y": -211.2619, "type": "wrap", "pole": 2},
-    {"x": -136.5576, "y": -234.1107, "type": "wrap", "pole": 2},
-    {"x": -114.6045, "y": -247.8195, "type": "wrap", "pole": 2},
-    {"x": -88.7381, "y": -248.7152, "type": "wrap", "pole": 2},
-    {"x": -65.8893, "y": -236.5576, "type": "wrap", "pole": 2},
-    {"x": -52.1805, "y": -214.6045, "type": "wrap", "pole": 2},
-    {"x": -51.2848, "y": -188.7381, "type": "wrap", "pole": 2},
-    {"x": -63.4424, "y": -165.8893, "type": "wrap", "pole": 2},
-    {"x": -85.3955, "y": -152.1805, "type": "wrap", "pole": 2},
-    {"x": -111.2619, "y": -151.2848, "type": "wrap", "pole": 2},
-    {"x": -134.1107, "y": -163.4424, "type": "wrap", "pole": 2},
-    {"x": -147.8195, "y": -185.3955, "type": "wrap", "pole": 2},
-    {"x": -148.7152, "y": -211.2619, "type": "wrap", "pole": 2},
-    {"x": -136.5576, "y": -234.1107, "type": "wrap", "pole": 2},
-    {"x": -114.6045, "y": -247.8195, "type": "wrap", "pole": 2},
-    {"x": -88.7381, "y": -248.7152, "type": "wrap", "pole": 2},
-    {"x": -65.8893, "y": -236.5576, "type": "wrap", "pole": 2},
-    {"x": -53.0103, "y": -217.0872, "type": "wrap", "pole": 2},
-    {"x": 46.9897, "y": 57.9128, "type": "move", "pole": 1},
-    {"x": 47.82, "y": 60.3969, "type": "wrap", "pole": 1},
-    {"x": 48.7117, "y": 86.2769, "type": "wrap", "pole": 1},
-    {"x": 36.5376, "y": 109.1322, "type": "wrap", "pole": 1},
-    {"x": 14.563, "y": 122.8322, "type": "wrap", "pole": 1},
-    {"x": -11.3178, "y": 123.7022, "type": "wrap", "pole": 1},
-    {"x": -34.1629, "y": 111.5089, "type": "wrap", "pole": 1},
-    {"x": -47.8444, "y": 89.5228, "type": "wrap", "pole": 1},
-    {"x": -48.6927, "y": 63.6413, "type": "wrap", "pole": 1},
-    {"x": -36.4802, "y": 40.8065, "type": "wrap", "pole": 1},
-    {"x": -14.4826, "y": 27.1434, "type": "wrap", "pole": 1},
-    {"x": 11.3996, "y": 26.3169, "type": "wrap", "pole": 1},
-    {"x": 34.2242, "y": 38.5486, "type": "wrap", "pole": 1},
-    {"x": 47.8688, "y": 60.5576, "type": "wrap", "pole": 1},
-    {"x": 48.6735, "y": 86.4405, "type": "wrap", "pole": 1},
-    {"x": 36.4227, "y": 109.2548, "type": "wrap", "pole": 1},
-    {"x": 14.4022, "y": 122.8809, "type": "wrap", "pole": 1},
-    {"x": -11.4814, "y": 123.6639, "type": "wrap", "pole": 1},
-    {"x": -34.2853, "y": 111.3939, "type": "wrap", "pole": 1},
-    {"x": -47.8929, "y": 89.3619, "type": "wrap", "pole": 1},
-    {"x": -48.6543, "y": 63.4777, "type": "wrap", "pole": 1},
-    {"x": -36.3651, "y": 40.6841, "type": "wrap", "pole": 1},
-    {"x": -14.3217, "y": 27.095, "type": "wrap", "pole": 1},
-    {"x": -1.428, "y": 25.0204, "type": "wrap", "pole": 1},
-    {"x": 173.572, "y": 20.0204, "type": "move", "pole": 4},
-    {"x": 176.1897, "y": 20.0142, "type": "wrap", "pole": 4},
-    {"x": 201.0232, "y": 27.3058, "type": "wrap", "pole": 4},
-    {"x": 218.8839, "y": 46.0374, "type": "wrap", "pole": 4},
-    {"x": 224.9858, "y": 71.1897, "type": "wrap", "pole": 4},
-    {"x": 217.6942, "y": 96.0232, "type": "wrap", "pole": 4},
-    {"x": 198.9626, "y": 113.8839, "type": "wrap", "pole": 4},
-    {"x": 173.8103, "y": 119.9858, "type": "wrap", "pole": 4},
-    {"x": 148.9768, "y": 112.6942, "type": "wrap", "pole": 4},
-    {"x": 131.1161, "y": 93.9626, "type": "wrap", "pole": 4},
-    {"x": 125.0142, "y": 68.8103, "type": "wrap", "pole": 4},
-    {"x": 132.3058, "y": 43.9768, "type": "wrap", "pole": 4},
-    {"x": 151.0374, "y": 26.1161, "type": "wrap", "pole": 4},
-    {"x": 176.1897, "y": 20.0142, "type": "wrap", "pole": 4},
-    {"x": 201.0232, "y": 27.3058, "type": "wrap", "pole": 4},
-    {"x": 218.8839, "y": 46.0374, "type": "wrap", "pole": 4},
-    {"x": 224.9858, "y": 71.1897, "type": "wrap", "pole": 4},
-    {"x": 217.6942, "y": 96.0232, "type": "wrap", "pole": 4},
-    {"x": 198.9626, "y": 113.8839, "type": "wrap", "pole": 4},
-    {"x": 173.8103, "y": 119.9858, "type": "wrap", "pole": 4},
-    {"x": 148.9768, "y": 112.6942, "type": "wrap", "pole": 4},
-    {"x": 131.1161, "y": 93.9626, "type": "wrap", "pole": 4},
-    {"x": 125.0142, "y": 68.8103, "type": "wrap", "pole": 4},
-    {"x": 132.3058, "y": 43.9768, "type": "wrap", "pole": 4},
-    {"x": 151.0374, "y": 26.1161, "type": "wrap", "pole": 4},
-    {"x": 173.572, "y": 20.0204, "type": "wrap", "pole": 4},
+    {"x": 0, "y": 0, "type": "start", "pole": 0, "arc_deg": 0},
+    {"x": 36.772, "y": 30.1467, "type": "move", "pole": 1, "arc_deg": 0},
+    {"x": 39.0717, "y": 32.135, "type": "wrap", "pole": 1, "arc_deg": 570.67},
+    {"x": 55.2804, "y": 57.4478, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 56.6426, "y": 87.4744, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 42.7926, "y": 114.1509, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 17.45, "y": 130.3127, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -12.5791, "y": 131.6195, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -39.2299, "y": 117.7202, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -55.3449, "y": 92.3477, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -56.5961, "y": 62.3162, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -42.6475, "y": 35.6911, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -17.2453, "y": 19.6231, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 12.7885, "y": 18.4274, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 39.3877, "y": 32.4252, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 55.4087, "y": 57.8572, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 56.5488, "y": 87.8931, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 42.5019, "y": 114.4663, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 17.0403, "y": 130.4403, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -12.9976, "y": 131.5249, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -39.5449, "y": 117.4288, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -54.508, "y": 94.8211, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -154.508, "y": -180.1789, "type": "move", "pole": 2, "arc_deg": 0},
+    {"x": -155.4707, "y": -183.0588, "type": "wrap", "pole": 2, "arc_deg": 540.0},
+    {"x": -156.5096, "y": -213.0638, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -142.4068, "y": -239.5684, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -116.9412, "y": -255.4707, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -86.9362, "y": -256.5096, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -60.4316, "y": -242.4068, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -44.5293, "y": -216.9412, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -43.4904, "y": -186.9362, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -57.5932, "y": -160.4316, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -83.0588, "y": -144.5293, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -113.0638, "y": -143.4904, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -139.5684, "y": -157.5932, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -155.4707, "y": -183.0588, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -156.5096, "y": -213.0638, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -142.4068, "y": -239.5684, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -116.9412, "y": -255.4707, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -86.9362, "y": -256.5096, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -60.4316, "y": -242.4068, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": -45.492, "y": -219.8211, "type": "wrap", "pole": 2, "arc_deg": 0},
+    {"x": 54.508, "y": 55.1789, "type": "move", "pole": 1, "arc_deg": 0},
+    {"x": 55.4711, "y": 58.0603, "type": "wrap", "pole": 1, "arc_deg": 648.35},
+    {"x": 56.5056, "y": 88.0812, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 42.3836, "y": 114.5933, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 16.893, "y": 130.4854, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -13.1287, "y": 131.4946, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -39.6289, "y": 117.3503, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -55.4995, "y": 91.8464, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -56.4835, "y": 61.8239, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -42.317, "y": 35.3355, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -16.7998, "y": 19.4863, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 13.2236, "y": 18.5276, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 39.7, "y": 32.7163, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 55.5278, "y": 58.2468, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 56.4613, "y": 88.271, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 42.2503, "y": 114.7355, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 16.7065, "y": 130.5418, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -13.3184, "y": 131.4501, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -39.771, "y": 117.2169, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -55.5558, "y": 91.6599, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -56.4389, "y": 61.6341, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -42.1835, "y": 35.1935, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -16.6132, "y": 19.4302, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": -1.6565, "y": 17.0237, "type": "wrap", "pole": 1, "arc_deg": 0},
+    {"x": 173.3435, "y": 12.0237, "type": "move", "pole": 4, "arc_deg": 0},
+    {"x": 176.3801, "y": 12.0164, "type": "wrap", "pole": 4, "arc_deg": 720.0},
+    {"x": 205.1869, "y": 20.4748, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 225.9053, "y": 42.2034, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 232.9836, "y": 71.3801, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 224.5252, "y": 100.1869, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 202.7966, "y": 120.9053, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 173.6199, "y": 127.9836, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 144.8131, "y": 119.5252, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 124.0947, "y": 97.7966, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 117.0164, "y": 68.6199, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 125.4748, "y": 39.8131, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 147.2034, "y": 19.0947, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 176.3801, "y": 12.0164, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 205.1869, "y": 20.4748, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 225.9053, "y": 42.2034, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 232.9836, "y": 71.3801, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 224.5252, "y": 100.1869, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 202.7966, "y": 120.9053, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 173.6199, "y": 127.9836, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 144.8131, "y": 119.5252, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 124.0947, "y": 97.7966, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 117.0164, "y": 68.6199, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 125.4748, "y": 39.8131, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 147.2034, "y": 19.0947, "type": "wrap", "pole": 4, "arc_deg": 0},
+    {"x": 173.3435, "y": 12.0237, "type": "wrap", "pole": 4, "arc_deg": 0},
 ]
 
 # ==================================================================
@@ -157,13 +158,11 @@ async def play(robot):
                 prev = PATH[i - 1] if i > 0 else None
                 if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:
                     await robot.set_lights_spin_rgb(255, 115, 0)
-                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode]")
-                    for _ in range(CIRCLES):
-                        await robot.arc_left(360, ARC_R)
+                    sweep = pt.get("arc_deg", 360)
+                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode, " + str(round(sweep, 1)) + " deg]")
+                    await robot.arc_left(sweep, ARC_R)
                     await robot.set_lights_on_rgb(0, 255, 0)
                     print("  Done wrapping pole " + str(pt["pole"]))
-                    await robot.wait(15)
-                    await robot.wait(2.0)
                 continue
 
             # NAVIGATE MODE
@@ -179,8 +178,6 @@ async def play(robot):
                 if nxt is None or nxt["type"] != "wrap" or nxt["pole"] != pt["pole"]:
                     await robot.set_lights_on_rgb(0, 255, 0)
                     print("  Done wrapping pole " + str(pt["pole"]))
-                    await robot.wait(15)
-                    await robot.wait(2.0)
 
     await robot.set_lights_blink_rgb(255, 255, 255)
     await robot.play_note(440, 0.5)

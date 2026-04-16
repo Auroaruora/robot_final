@@ -192,18 +192,24 @@ def _reduce_for_robot(pts, wrap_step=10):
         if len(group) <= 2:
             robot_pts.extend(group)
             continue
-        robot_pts.append(group[0])
+        # First wrap point keeps its arc_deg
+        first = dict(group[0])
+        robot_pts.append(first)
         for j in range(wrap_step, len(group) - 1, wrap_step):
-            robot_pts.append(group[j])
-        robot_pts.append(group[-1])
+            mid = dict(group[j])
+            mid["arc_deg"] = 0
+            robot_pts.append(mid)
+        last = dict(group[-1])
+        last["arc_deg"] = 0
+        robot_pts.append(last)
     return robot_pts
 
 def _pts_to_csv(pts):
     cb = io.StringIO()
     w = _csv.writer(cb)
-    w.writerow(["step","x","y","type","pole"])
+    w.writerow(["step","x","y","type","pole","arc_deg"])
     for i,p in enumerate(pts):
-        w.writerow([i, round(p["x"],4), round(p["y"],4), p["type"], p["pole"]])
+        w.writerow([i, round(p["x"],4), round(p["y"],4), p["type"], p["pole"], p.get("arc_deg", 0)])
     return cb.getvalue()
 
 def _generate_driver_code(rid, robot_pts, cfg):
@@ -214,12 +220,14 @@ def _generate_driver_code(rid, robot_pts, cfg):
 
     sx, sy = start[0], start[1]
     local = [{"x": round(p["x"] - sx, 4), "y": round(p["y"] - sy, 4),
-              "type": p["type"], "pole": p["pole"]} for p in robot_pts]
+              "type": p["type"], "pole": p["pole"],
+              "arc_deg": p.get("arc_deg", 0)} for p in robot_pts]
 
     lines = []
     for p in local:
         lines.append('    {"x": ' + str(p["x"]) + ', "y": ' + str(p["y"]) +
-                     ', "type": "' + p["type"] + '", "pole": ' + str(p["pole"]) + '},')
+                     ', "type": "' + p["type"] + '", "pole": ' + str(p["pole"]) +
+                     ', "arc_deg": ' + str(p["arc_deg"]) + '},')
     path_literal = "[\\n" + "\\n".join(lines) + "\\n]"
 
     arc_cmd = "arc_left" if direction == "ccw" else "arc_right"
@@ -237,8 +245,8 @@ def _generate_driver_code(rid, robot_pts, cfg):
         'Re-run compute_path_' + rid + '.py or use the website to regenerate.\\n'
         '\\n'
         'TWO WRAPPING MODES - change WRAP_MODE to swap:\\n'
-        '  "arc"      = single ' + arc_cmd + ' command (fast, less accurate)\\n'
-        '  "navigate" = follow reduced waypoints via navigate_to (slow, more accurate)\\n'
+        '  "arc"      = ' + arc_cmd + ' using computed sweep angle (fast, more accurate)\\n'
+        '  "navigate" = follow reduced waypoints via navigate_to (slow, most accurate)\\n'
         '\"\"\"\\n'
         '\\n'
         'from irobot_edu_sdk.backend.bluetooth import Bluetooth\\n'
@@ -260,6 +268,7 @@ def _generate_driver_code(rid, robot_pts, cfg):
         '\\n'
         '# ==================================================================\\n'
         '# EMBEDDED PATH  (' + str(len(local)) + ' waypoints, reduced for robot)\\n'
+        '# arc_deg: total sweep angle for each pole wrap (on first wrap pt)\\n'
         '# ==================================================================\\n'
         '\\n'
         'PATH = ' + path_literal + '\\n'
@@ -296,9 +305,9 @@ def _generate_driver_code(rid, robot_pts, cfg):
         '                prev = PATH[i - 1] if i > 0 else None\\n'
         '                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:\\n'
         '                    await robot.set_lights_spin_rgb(255, 115, 0)\\n'
-        '                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode]")\\n'
-        '                    for _ in range(CIRCLES):\\n'
-        '                        await robot.' + arc_cmd + '(360, ARC_R)\\n'
+        '                    sweep = pt.get("arc_deg", 360)\\n'
+        '                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode, " + str(round(sweep, 1)) + " deg]")\\n'
+        '                    await robot.' + arc_cmd + '(sweep, ARC_R)\\n'
         '                    await robot.set_lights_on_rgb(' + light_rgb + ')\\n'
         '                    print("  Done wrapping pole " + str(pt["pole"]))\\n'
         '                    await robot.wait(15)\\n'
@@ -347,7 +356,8 @@ def run_compute_path_and_extract(code_str):
             elif isinstance(wp,(list,tuple)):
                 result.append({"x":float(wp[0]),"y":float(wp[1]),
                     "type":str(wp[2]) if len(wp)>2 else "move",
-                    "pole":int(wp[3]) if len(wp)>3 else 0})
+                    "pole":int(wp[3]) if len(wp)>3 else 0,
+                    "arc_deg":0})
         cfg={}
         for k in ['POLES','POLE_R','ROBOT_R','SAFETY','ARC_R','START','SEQ','DIR','CIRCLES','SIGN','RID','ROBOT_WRAP_STEP']:
             if k in ns:
