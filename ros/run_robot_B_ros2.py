@@ -1,29 +1,14 @@
 """
-run_robot_B.py  (auto-generated)
+run_robot_B_ros2.py  (ROS 2 port)
 =====================================================
-Path is embedded below - no CSV file needed.
-Re-run compute_path.py or use the website to regenerate.
-
-TWO INDEPENDENT MODE TOGGLES - comment/uncomment to swap:
-
-  WRAP_MODE       -> how the robot traces the circle around a pole
-    "arc"         = arc_right using computed sweep angle (fast, more accurate)
-    "navigate"    = follow reduced waypoints via navigate_to (slow, most accurate)
-
-  CORRECTION_MODE -> how the robot fixes its position before each wrap point
-    "none"        = no correction, trust odometry only
-    "ir"          = use IR sensor + known pole position to fix pose before wrap
-    (more modes may be added later for comparison)
-
-CORRECTION timing (same for both wrap modes):
-  - BEFORE a pole's wrap starts  -> fix pose so the wrap begins correctly
-  - AFTER  a pole's wrap ends    -> fix pose so the next leg starts correctly
-  Correction does NOT run on intermediate wrap waypoints.
+Mirror of run_robot_B.py (SDK version) running over ROS 2.
 """
 
-from irobot_edu_sdk.backend.bluetooth import Bluetooth
-from irobot_edu_sdk.robots import event, Create3
+import asyncio
 import math
+import rclpy
+
+from create3_driver import Create3Ros
 
 # ==================================================================
 # CONFIG
@@ -33,41 +18,23 @@ DIR     = "cw"
 CIRCLES = 1
 ARC_R   = 58
 
-# ==================================================================
-# WRAP MODE - how to draw the circle around the pole
-# Comment out one, leave the other active.
-# ==================================================================
 WRAP_MODE = "arc"
 # WRAP_MODE = "navigate"
 
-# ==================================================================
-# CORRECTION MODE - how to fix odometry drift before each wrap point
-# Comment out one, leave the other active.
-# ==================================================================
 CORRECTION_MODE = "ir"
 # CORRECTION_MODE = "none"
 
-# ==================================================================
-# IR CORRECTION PARAMETERS
-# ==================================================================
-CENTER_SEARCH_DEG = 8       # +/- degrees to dither
-CENTER_STEP_DEG   = 1       # degree increment per dither step
-CENTER_SAMPLES    = 3       # IR samples averaged per step
-CENTER_SENSOR_IDX = 3       # center sensor of 7-sensor IR array
+CENTER_SEARCH_DEG = 8
+CENTER_STEP_DEG   = 1
+CENTER_SAMPLES    = 3
+CENTER_SENSOR_IDX = 3
 
-# Pole positions in the robot's LOCAL frame (world coords minus
-# start position). reset_navigation() makes local = robot odom frame.
 POLE_POSITIONS = {
     1: (120, -125),
     3: (0, -80),
     4: (295, -130),
     5: (270, -350),
 }
-
-# ==================================================================
-# EMBEDDED PATH  (96 waypoints, reduced for robot)
-# arc_deg: total sweep angle for each pole wrap (on first wrap pt)
-# ==================================================================
 
 PATH = [
     {"x": 0, "y": 0, "type": "start", "pole": 0, "arc_deg": 0},
@@ -168,42 +135,16 @@ PATH = [
     {"x": 327.6291, "y": -356.5488, "type": "wrap", "pole": 5, "arc_deg": 0},
 ]
 
-# ==================================================================
-# ROBOT DRIVER
-# ==================================================================
 
-robot = Create3(Bluetooth())
-
-
-# ------------------------------------------------------------------
-# CORRECTION: IR-based pose fix before a wrap waypoint
-# ------------------------------------------------------------------
 async def ir_correct_pose(robot, pole_id, wrap_x, wrap_y):
-    """
-    Fix position/heading before wrapping using:
-      - Known pole position (from POLE_POSITIONS)
-      - Expected wrap waypoint (wrap_x, wrap_y) - where robot SHOULD be
-      - IR sensor to lock onto the real pole direction
-
-    Strategy:
-      1. Turn to face the pole (based on current odometry pose)
-      2. Dither +/- a few degrees and find IR peak (TRUE pole direction)
-      3. Robot is now pointed AT the pole along a known ray.
-      4. The wrap waypoint should be at distance ARC_R from the pole
-         on this ray (but on the robot's side). Drive/back the robot
-         so its distance from the pole equals ARC_R.
-      5. Leave robot pointing at the pole - wrap code handles next turn.
-    """
     if pole_id not in POLE_POSITIONS:
-        print("  [ir-fix] no known pos for pole " + str(pole_id) + ", skipping")
+        print(f"  [B][ir-fix] no known pos for pole {pole_id}, skipping")
         return
 
     pose = await robot.get_position()
     rx, ry, rh = pose.x, pose.y, pose.heading
-
     px, py = POLE_POSITIONS[pole_id]
 
-    # ---- Step 1: turn to face pole based on odometry ----
     target_heading = math.degrees(math.atan2(py - ry, px - rx))
     delta = target_heading - rh
     while delta > 180:  delta -= 360
@@ -214,7 +155,6 @@ async def ir_correct_pose(robot, pole_id, wrap_x, wrap_y):
     else:
         await robot.turn_right(-delta)
 
-    # ---- Step 2: dither to find IR peak ----
     await robot.turn_right(CENTER_SEARCH_DEG)
 
     best_reading = -1
@@ -233,61 +173,46 @@ async def ir_correct_pose(robot, pole_id, wrap_x, wrap_y):
         if step < num_steps:
             await robot.turn_left(CENTER_STEP_DEG)
 
-    # turn back to the best-reading heading
     back = (num_steps - best_index) * CENTER_STEP_DEG
     if back > 0:
         await robot.turn_right(back)
 
     offset = (best_index * CENTER_STEP_DEG) - CENTER_SEARCH_DEG
 
-    # ---- Step 3: distance correction ----
-    # Robot is now pointed at the true pole. Expected distance to pole
-    # from the wrap waypoint is ARC_R.  Measure actual distance using
-    # odometry (pole pos is known, robot pos is approximate) and nudge
-    # to ARC_R so the circle traced has the right radius.
     pose2 = await robot.get_position()
     dx = px - pose2.x
     dy = py - pose2.y
     measured_dist = math.sqrt(dx*dx + dy*dy)
-    nudge = measured_dist - ARC_R  # positive = need to move forward
+    nudge = measured_dist - ARC_R
 
-    # Safety clamp - never move more than a few cm from a single correction
     if nudge > 10:   nudge = 10
     if nudge < -10:  nudge = -10
 
     if abs(nudge) > 0.5:
         await robot.move(nudge)
 
-    print("  [ir-fix] pole " + str(pole_id) +
-          " | ir=" + str(round(best_reading, 1)) +
-          " | heading_off=" + str(round(offset, 1)) + "deg" +
-          " | dist_nudge=" + str(round(nudge, 1)) + "cm")
+    print(f"  [B][ir-fix] pole {pole_id}"
+          f" | ir={round(best_reading,1)}"
+          f" | heading_off={round(offset,1)}deg"
+          f" | dist_nudge={round(nudge,1)}cm")
 
 
-# ------------------------------------------------------------------
-# CORRECTION DISPATCHER - easy to add more modes later
-# ------------------------------------------------------------------
 async def apply_correction(robot, pt):
     if CORRECTION_MODE == "none":
         return
     elif CORRECTION_MODE == "ir":
         await ir_correct_pose(robot, pt["pole"], pt["x"], pt["y"])
-    # Add future correction modes here:
-    # elif CORRECTION_MODE == "camera":
-    #     await camera_correct_pose(...)
     else:
-        print("  [correction] unknown mode '" + CORRECTION_MODE + "', skipping")
+        print(f"  [B][correction] unknown mode '{CORRECTION_MODE}', skipping")
 
 
-@event(robot.when_play)
-async def play(robot):
+async def run_robot_B(robot: Create3Ros):
+    await robot.wait_until_ready()
     await robot.reset_navigation()
-    await robot.set_lights_on_rgb(0, 0, 255)       # Blue = Robot B
+    await robot.set_lights_on_rgb(0, 0, 255)      # Blue = Robot B
 
-    print("Robot B | dir=" + DIR +
-          " | wrap=" + WRAP_MODE +
-          " | correction=" + CORRECTION_MODE +
-          " | " + str(len(PATH)) + " waypoints")
+    print(f"Robot B | dir={DIR} | wrap={WRAP_MODE}"
+          f" | correction={CORRECTION_MODE} | {len(PATH)} waypoints")
 
     current_pole = None
 
@@ -298,11 +223,10 @@ async def play(robot):
         if pt["type"] == "move":
             if pt["pole"] != current_pole:
                 current_pole = pt["pole"]
-                print("\n--- Heading to Pole " + str(current_pole) + " ---")
+                print(f"\n[B] --- Heading to Pole {current_pole} ---")
             await robot.navigate_to(pt["x"], pt["y"])
 
         elif pt["type"] == "wrap":
-
             prev = PATH[i - 1] if i > 0 else None
             nxt  = PATH[i + 1] if i + 1 < len(PATH) else None
 
@@ -311,47 +235,53 @@ async def play(robot):
             is_last_wrap  = (nxt is None or nxt["type"] != "wrap"
                              or nxt["pole"] != pt["pole"])
 
-            # ARC MODE - one big arc on the first wrap point, skip the rest.
             if WRAP_MODE == "arc":
                 if is_first_wrap:
-                    # CORRECTION: before the wrap begins
                     await apply_correction(robot, pt)
-
                     await robot.set_lights_spin_rgb(255, 115, 0)
                     sweep = pt.get("arc_deg", 360)
-                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR +
-                          ") [arc mode, " + str(round(sweep, 1)) + " deg]")
+                    print(f"[B]   Wrapping pole {pt['pole']} ({DIR})"
+                          f" [arc mode, {round(sweep,1)} deg]")
                     await robot.arc_right(sweep, ARC_R)
                     await robot.set_lights_on_rgb(0, 0, 255)
-                    print("  Done wrapping pole " + str(pt["pole"]))
-
-                    # CORRECTION: after the wrap ends
-                    # (in arc mode the first wrap point IS the only point
-                    #  where we act, so first == last here)
+                    print(f"[B]   Done wrapping pole {pt['pole']}")
                     await apply_correction(robot, pt)
                 continue
 
-            # NAVIGATE MODE - drive from wrap point to wrap point.
             elif WRAP_MODE == "navigate":
                 if is_first_wrap:
-                    # CORRECTION: before the wrap begins
                     await apply_correction(robot, pt)
                     await robot.set_lights_spin_rgb(255, 115, 0)
-                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR +
-                          ") [navigate mode]")
+                    print(f"[B]   Wrapping pole {pt['pole']} ({DIR}) [navigate mode]")
 
                 await robot.navigate_to(pt["x"], pt["y"])
 
                 if is_last_wrap:
-                    # CORRECTION: after the wrap ends
                     await apply_correction(robot, pt)
                     await robot.set_lights_on_rgb(0, 0, 255)
-                    print("  Done wrapping pole " + str(pt["pole"]))
+                    print(f"[B]   Done wrapping pole {pt['pole']}")
 
     await robot.set_lights_blink_rgb(255, 255, 255)
     await robot.play_note(440, 0.5)
     await robot.play_note(880, 0.5)
-    await robot.stop_sound()
     print("\nRobot B complete!")
 
-robot.play()
+
+def main():
+    rclpy.init()
+    robot = Create3Ros(namespace='robot_b')
+
+    import threading
+    executor_thread = threading.Thread(
+        target=rclpy.spin, args=(robot,), daemon=True)
+    executor_thread.start()
+
+    try:
+        asyncio.run(run_robot_B(robot))
+    finally:
+        robot.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
