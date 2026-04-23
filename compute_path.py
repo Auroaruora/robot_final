@@ -1,19 +1,23 @@
 """
 compute_path.py  —  Unified path planner for Robot A and Robot B
 ==================================================================
-Single source of truth. Generates, for BOTH robots:
-  - path_<RID>.csv          (full waypoint list, for debugging)
-  - path_<RID>_robot.csv    (reduced waypoint list, what the robot uses)
-  - run_robot_<RID>.py      (playground-ready driver, path embedded,
-                             plus IR-based pole centering using the
-                             world POLES dict as ground truth)
+Single source of truth. Generates per-robot data files only:
+  - path_<RID>.csv          (full waypoint list, WORLD frame, for debugging)
+  - path_<RID>_robot.csv    (reduced waypoint list, LOCAL frame — what
+                             run_robot.py loads at startup)
+  - run_config_<RID>.json   (all per-robot constants run_robot.py needs:
+                             direction, ARC_R, lights, bluetooth address, etc.)
 
-Run this file directly to regenerate all six output files at once.
-Also exposed to the website (Pyodide) via build_path(rid) and
-generate_driver_code(rid, robot_pts).
+The driver code itself lives in a hand-maintained run_robot.py and is
+never regenerated. Set ROBOT_ID at the top of run_robot.py to choose
+which robot to drive.
+
+Exposed to the website (Pyodide) via build_path(rid),
+reduce_for_robot(pts), robot_csv_text(rid, robot_pts),
+and run_config_text(rid, robot_pts).
 """
 
-import math, csv, os
+import math, csv, os, io, json
 
 # ==================================================================
 # WORLD CONFIGURATION  (shared by both robots)
@@ -41,16 +45,25 @@ ARC_R   = POLE_R + ROBOT_R + SAFETY
 ROBOTS = {
     "A": {
         "start":   (0, 0),
-        "seq":     [1, 4],
+        "seq":     [1, 4, 2],
         "dir":     "ccw",
         "circles": 1,
     },
     "B": {
         "start":   (-120, 200),
-        "seq":     [3, 1, 4, 5],
+        "seq":     [3, 2, 5, 4, 1, 5, 2],
         "dir":     "cw",
         "circles": 1,
     },
+}
+
+# Per-robot Bluetooth (BLE) addresses. On macOS these are the
+# Create3's system-assigned UUID; on other platforms they may be
+# the Bluetooth MAC. Flowed through into run_config_<RID>.json so
+# run_robot.py can do Create3(Bluetooth(address=...)) deterministically.
+BLUETOOTH_ADDRESSES = {
+    "A": "38E42E1C-5EA3-F705-C05D-43EB8600C88B",
+    "B": "REPLACE-WITH-ROBOT-B-ADDRESS",
 }
 
 # How aggressively to reduce wrap-arc points for the robot driver.
@@ -282,256 +295,71 @@ def save_csv(pts, filename):
                         p["type"], p["pole"], p.get("arc_deg", 0)])
     return filepath
 
-# ==================================================================
-# DRIVER CODE GENERATION
-# ==================================================================
-# Emits a fully self-contained run_robot_<rid>.py suitable for
-# pasting into the iRobot Python Playground. The generated file
-# includes:
-#   - embedded PATH (local-frame coordinates)
-#   - embedded POLE_POSITIONS (local-frame, used by center_on_pole)
-#   - IR-centering helper that runs before each wrap
+def robot_csv_text(rid, robot_pts):
+    """Return the path_<rid>_robot.csv content in the robot's LOCAL frame.
 
-def _path_literal(local_pts):
-    """Render the PATH dict list as valid Python source."""
-    lines = []
-    for p in local_pts:
-        lines.append(
-            '    {"x": ' + str(p["x"]) +
-            ', "y": ' + str(p["y"]) +
-            ', "type": "' + p["type"] + '"' +
-            ', "pole": ' + str(p["pole"]) +
-            ', "arc_deg": ' + str(p["arc_deg"]) + '},'
-        )
-    return "[\n" + "\n".join(lines) + "\n]"
-
-
-def _pole_positions_literal(rid):
-    """Render POLE_POSITIONS in the robot's local frame.
-
-    The robot does reset_navigation() at startup — its origin is
-    its own starting pose. So we translate world pole coords by
-    subtracting the robot's world start position. Only include poles
-    that appear in this robot's sequence (the only ones it centers on).
+    run_robot_<rid>.py loads this file at startup. reset_navigation()
+    makes the robot's odometry origin equal its starting pose, so all
+    coords must be translated by subtracting the world start position.
     """
     cfg = ROBOTS[rid]
     sx, sy = cfg["start"]
-    used = sorted(set(cfg["seq"]))
-    lines = []
-    for pid in used:
-        px, py = POLES[pid]
-        lines.append(
-            "    " + str(pid) + ": (" +
-            str(round(px - sx, 4)) + ", " +
-            str(round(py - sy, 4)) + "),"
-        )
-    return "{\n" + "\n".join(lines) + "\n}"
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["step", "x", "y", "type", "pole", "arc_deg"])
+    for i, p in enumerate(robot_pts):
+        w.writerow([i, round(p["x"] - sx, 4), round(p["y"] - sy, 4),
+                    p["type"], p["pole"], p.get("arc_deg", 0)])
+    return buf.getvalue()
 
+# ==================================================================
+# RUN CONFIG  (per-robot JSON consumed by run_robot.py)
+# ==================================================================
 
-def generate_driver_code(rid, robot_pts):
-    """Return the full source text of run_robot_<rid>.py."""
+def run_config_dict(rid, robot_pts):
+    """Build the run_config_<rid>.json payload for run_robot.py.
+
+    Includes every per-robot value the driver needs at runtime.
+    """
     cfg = ROBOTS[rid]
+    sx, sy = cfg["start"]
     direction = cfg["dir"]
-    circles   = cfg["circles"]
-    sx, sy    = cfg["start"]
-
-    # Translate path waypoints into the robot's local frame
-    local = [{
-        "x": round(p["x"] - sx, 4),
-        "y": round(p["y"] - sy, 4),
-        "type": p["type"],
-        "pole": p["pole"],
-        "arc_deg": p.get("arc_deg", 0),
-    } for p in robot_pts]
-
-    path_lit = _path_literal(local)
-    poles_lit = _pole_positions_literal(rid)
 
     arc_cmd = "arc_left" if direction == "ccw" else "arc_right"
     if rid == "A":
-        light_rgb, color_name = "0, 255, 0", "Green"
+        light_rgb, color_name = [0, 255, 0], "Green"
     else:
-        light_rgb, color_name = "0, 0, 255", "Blue"
+        light_rgb, color_name = [0, 0, 255], "Blue"
 
-    # Build the file as a list of lines (easier to read than one giant f-string)
-    L = []
-    L.append('"""')
-    L.append('run_robot_' + rid + '.py  (auto-generated)')
-    L.append('=====================================================')
-    L.append('Path is embedded below - no CSV file needed.')
-    L.append('Re-run compute_path.py or use the website to regenerate.')
-    L.append('')
-    L.append('TWO WRAPPING MODES - change WRAP_MODE to swap:')
-    L.append('  "arc"      = ' + arc_cmd + ' using computed sweep angle (fast, more accurate)')
-    L.append('  "navigate" = follow reduced waypoints via navigate_to (slow, most accurate)')
-    L.append('')
-    L.append('IR POLE CENTERING:')
-    L.append('  Before each wrap, the robot turns to face the known pole position,')
-    L.append('  then dithers a few degrees to find the peak IR return. This corrects')
-    L.append('  accumulated heading drift from wheel odometry. Set CENTER_ON_POLE=False')
-    L.append('  to disable.')
-    L.append('"""')
-    L.append('')
-    L.append('from irobot_edu_sdk.backend.bluetooth import Bluetooth')
-    L.append('from irobot_edu_sdk.robots import event, Create3')
-    L.append('import math')
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# CONFIG')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('DIR     = "' + direction + '"')
-    L.append('CIRCLES = ' + str(circles))
-    L.append('ARC_R   = ' + str(ARC_R))
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# WRAPPING MODE - CHANGE THIS TO SWAP')
-    L.append('# ==================================================================')
-    L.append('WRAP_MODE = "arc"')
-    L.append('# WRAP_MODE = "navigate"')
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# IR CENTERING  (fine heading correction before each wrap)')
-    L.append('# ==================================================================')
-    L.append('CENTER_ON_POLE    = True    # set False to disable')
-    L.append('CENTER_SEARCH_DEG = 8       # +/- degrees to dither')
-    L.append('CENTER_STEP_DEG   = 1       # degree increment per dither step')
-    L.append('CENTER_SAMPLES    = 3       # IR samples averaged per step')
-    L.append('CENTER_SENSOR_IDX = 3       # center sensor of 7-sensor IR array')
-    L.append('')
-    L.append('# Pole positions in the robot\'s LOCAL frame (world coords minus')
-    L.append('# start position). reset_navigation() makes local = robot odom frame.')
-    L.append('POLE_POSITIONS = ' + poles_lit)
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# EMBEDDED PATH  (' + str(len(local)) + ' waypoints, reduced for robot)')
-    L.append('# arc_deg: total sweep angle for each pole wrap (on first wrap pt)')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('PATH = ' + path_lit)
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# ROBOT DRIVER')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('robot = Create3(Bluetooth())')
-    L.append('')
-    L.append('')
-    L.append('async def center_on_pole(robot, pole_id):')
-    L.append('    """Face the pole using known coords, then dither IR for peak."""')
-    L.append('    if pole_id not in POLE_POSITIONS:')
-    L.append('        print("  [center] no known position for pole " + str(pole_id) + ", skipping")')
-    L.append('        return')
-    L.append('')
-    L.append('    pose = await robot.get_position()')
-    L.append('    rx, ry, rh = pose.x, pose.y, pose.heading')
-    L.append('')
-    L.append('    px, py = POLE_POSITIONS[pole_id]')
-    L.append('    target_heading = math.degrees(math.atan2(py - ry, px - rx))')
-    L.append('')
-    L.append('    delta = target_heading - rh')
-    L.append('    while delta > 180:  delta -= 360')
-    L.append('    while delta < -180: delta += 360')
-    L.append('')
-    L.append('    print("  [center] facing pole " + str(pole_id) +')
-    L.append('          " (turning " + str(round(delta, 1)) + " deg)")')
-    L.append('')
-    L.append('    if delta >= 0:')
-    L.append('        await robot.turn_left(delta)')
-    L.append('    else:')
-    L.append('        await robot.turn_right(-delta)')
-    L.append('')
-    L.append('    # Dither: turn right to leftmost edge of sweep, then step LEFT across it')
-    L.append('    await robot.turn_right(CENTER_SEARCH_DEG)')
-    L.append('')
-    L.append('    best_reading = -1')
-    L.append('    best_index   = 0')
-    L.append('    num_steps    = int(2 * CENTER_SEARCH_DEG / CENTER_STEP_DEG)')
-    L.append('')
-    L.append('    for step in range(num_steps + 1):')
-    L.append('        total = 0')
-    L.append('        for _ in range(CENTER_SAMPLES):')
-    L.append('            ir = await robot.get_ir_proximity()')
-    L.append('            total += ir.sensors[CENTER_SENSOR_IDX]')
-    L.append('        avg = total / CENTER_SAMPLES')
-    L.append('        if avg > best_reading:')
-    L.append('            best_reading = avg')
-    L.append('            best_index   = step')
-    L.append('        if step < num_steps:')
-    L.append('            await robot.turn_left(CENTER_STEP_DEG)')
-    L.append('')
-    L.append('    back = (num_steps - best_index) * CENTER_STEP_DEG')
-    L.append('    if back > 0:')
-    L.append('        await robot.turn_right(back)')
-    L.append('')
-    L.append('    offset = (best_index * CENTER_STEP_DEG) - CENTER_SEARCH_DEG')
-    L.append('    print("  [center] locked on pole " + str(pole_id) +')
-    L.append('          " | best_ir=" + str(round(best_reading, 1)) +')
-    L.append('          " | heading offset=" + str(round(offset, 1)) + " deg")')
-    L.append('')
-    L.append('')
-    L.append('@event(robot.when_play)')
-    L.append('async def play(robot):')
-    L.append('    await robot.reset_navigation()')
-    L.append('    await robot.set_lights_on_rgb(' + light_rgb + ')       # ' + color_name + ' = Robot ' + rid)
-    L.append('')
-    L.append('    print("Robot ' + rid + ' | dir=" + DIR + " mode=" + WRAP_MODE + " | " + str(len(PATH)) + " waypoints")')
-    L.append('')
-    L.append('    current_pole = None')
-    L.append('')
-    L.append('    for i, pt in enumerate(PATH):')
-    L.append('        if pt["type"] == "start":')
-    L.append('            continue')
-    L.append('')
-    L.append('        if pt["type"] == "move":')
-    L.append('            if pt["pole"] != current_pole:')
-    L.append('                current_pole = pt["pole"]')
-    L.append('                print("\\n--- Heading to Pole " + str(current_pole) + " ---")')
-    L.append('            await robot.navigate_to(pt["x"], pt["y"])')
-    L.append('')
-    L.append('        elif pt["type"] == "wrap":')
-    L.append('')
-    L.append('            prev = PATH[i - 1] if i > 0 else None')
-    L.append('            is_first_wrap = (prev is None or prev["type"] != "wrap"')
-    L.append('                             or prev["pole"] != pt["pole"])')
-    L.append('')
-    L.append('            if is_first_wrap and CENTER_ON_POLE:')
-    L.append('                await center_on_pole(robot, pt["pole"])')
-    L.append('')
-    L.append('            # ARC MODE')
-    L.append('            if WRAP_MODE == "arc":')
-    L.append('                if is_first_wrap:')
-    L.append('                    await robot.set_lights_spin_rgb(255, 115, 0)')
-    L.append('                    sweep = pt.get("arc_deg", 360)')
-    L.append('                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode, " + str(round(sweep, 1)) + " deg]")')
-    L.append('                    await robot.' + arc_cmd + '(sweep, ARC_R)')
-    L.append('                    await robot.set_lights_on_rgb(' + light_rgb + ')')
-    L.append('                    print("  Done wrapping pole " + str(pt["pole"]))')
-    L.append('                continue')
-    L.append('')
-    L.append('            # NAVIGATE MODE')
-    L.append('            elif WRAP_MODE == "navigate":')
-    L.append('                if is_first_wrap:')
-    L.append('                    await robot.set_lights_spin_rgb(255, 115, 0)')
-    L.append('                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [navigate mode]")')
-    L.append('')
-    L.append('                await robot.navigate_to(pt["x"], pt["y"])')
-    L.append('')
-    L.append('                nxt = PATH[i + 1] if i + 1 < len(PATH) else None')
-    L.append('                if nxt is None or nxt["type"] != "wrap" or nxt["pole"] != pt["pole"]:')
-    L.append('                    await robot.set_lights_on_rgb(' + light_rgb + ')')
-    L.append('                    print("  Done wrapping pole " + str(pt["pole"]))')
-    L.append('')
-    L.append('    await robot.set_lights_blink_rgb(255, 255, 255)')
-    L.append('    await robot.play_note(440, 0.5)')
-    L.append('    await robot.play_note(880, 0.5)')
-    L.append('    await robot.stop_sound()')
-    L.append('    print("\\nRobot ' + rid + ' complete!")')
-    L.append('')
-    L.append('robot.play()')
-    L.append('')
+    # Distance is computed from the full (pre-reduction) pts ideally, but
+    # robot_pts is what the driver loads — use that so the number matches
+    # what run_robot.py will see.
+    total = 0.0
+    for i in range(1, len(robot_pts)):
+        total += math.hypot(robot_pts[i]["x"] - robot_pts[i-1]["x"],
+                            robot_pts[i]["y"] - robot_pts[i-1]["y"])
 
-    return "\n".join(L)
+    return {
+        "rid":                rid,
+        "dir":                direction,
+        "arc_cmd":            arc_cmd,
+        "arc_r":              ARC_R,
+        "circles":            cfg["circles"],
+        "light_rgb":          light_rgb,
+        "color_name":         color_name,
+        "seq":                list(cfg["seq"]),
+        "start_world":        [sx, sy],
+        "path_csv":           "path_" + rid + "_robot.csv",
+        "bluetooth_address":  BLUETOOTH_ADDRESSES.get(rid, ""),
+        "waypoint_count":     len(robot_pts),
+        "total_distance_cm":  round(total, 2),
+    }
+
+
+def run_config_text(rid, robot_pts):
+    """JSON text for run_config_<rid>.json (what both compute_path.py and
+    the website write to disk)."""
+    return json.dumps(run_config_dict(rid, robot_pts), indent=2)
 
 # ==================================================================
 # MAIN — regenerate all six output files
@@ -548,12 +376,15 @@ def main():
             for i in range(1, len(pts))
         )
 
-        save_csv(pts,       "path_" + rid + ".csv")
-        save_csv(robot_pts, "path_" + rid + "_robot.csv")
+        save_csv(pts, "path_" + rid + ".csv")
 
-        drv_path = os.path.join(script_dir, "run_robot_" + rid + ".py")
-        with open(drv_path, "w") as f:
-            f.write(generate_driver_code(rid, robot_pts))
+        robot_csv_path = os.path.join(script_dir, "path_" + rid + "_robot.csv")
+        with open(robot_csv_path, "w", newline="") as f:
+            f.write(robot_csv_text(rid, robot_pts))
+
+        config_path = os.path.join(script_dir, "run_config_" + rid + ".json")
+        with open(config_path, "w") as f:
+            f.write(run_config_text(rid, robot_pts))
 
         cfg = ROBOTS[rid]
         print("Robot " + rid + " | start=" + str(cfg["start"]) +
@@ -562,7 +393,7 @@ def main():
               " circles=" + str(cfg["circles"]))
         print("  full: " + str(len(pts)) + " wpts, " +
               str(round(total, 1)) + " cm | robot: " + str(len(robot_pts)) + " wpts")
-        print("  Saved path_" + rid + ".csv, path_" + rid + "_robot.csv, run_robot_" + rid + ".py")
+        print("  Saved path_" + rid + ".csv, path_" + rid + "_robot.csv, run_config_" + rid + ".json")
 
 if __name__ == "__main__":
     main()

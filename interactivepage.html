@@ -78,7 +78,7 @@
         </div>
       </div>
       <button class="btn pri full" onclick="applyConfig()" style="margin-top:6px">Apply &amp; Rebuild</button>
-      <p style="font-size:10px;color:var(--muted);margin-top:6px">Rewrites config, runs Python via Pyodide, saves path CSVs + run_robot driver files to disk.</p>
+      <p style="font-size:10px;color:var(--muted);margin-top:6px">Rewrites config, runs Python via Pyodide, saves path CSVs + run_config JSON files to disk.</p>
     </div>
   </div>
 
@@ -173,35 +173,6 @@ _install_mock('irobot_edu_sdk',['backend','backend.bluetooth','robots','music','
 _install_mock('bleak')
 _install_mock('serial')
 
-def _reduce_for_robot(pts, wrap_step=10):
-    robot_pts = []
-    i = 0
-    while i < len(pts):
-        p = pts[i]
-        if p["type"] != "wrap":
-            robot_pts.append(p)
-            i += 1
-            continue
-        pole = p["pole"]
-        group_start = i
-        while i < len(pts) and pts[i]["type"] == "wrap" and pts[i]["pole"] == pole:
-            i += 1
-        group = pts[group_start:i]
-        if len(group) <= 2:
-            robot_pts.extend(group)
-            continue
-        # First wrap point keeps its arc_deg
-        first = dict(group[0])
-        robot_pts.append(first)
-        for j in range(wrap_step, len(group) - 1, wrap_step):
-            mid = dict(group[j])
-            mid["arc_deg"] = 0
-            robot_pts.append(mid)
-        last = dict(group[-1])
-        last["arc_deg"] = 0
-        robot_pts.append(last)
-    return robot_pts
-
 def _pts_to_csv(pts):
     cb = io.StringIO()
     w = _csv.writer(cb)
@@ -209,155 +180,6 @@ def _pts_to_csv(pts):
     for i,p in enumerate(pts):
         w.writerow([i, round(p["x"],4), round(p["y"],4), p["type"], p["pole"], p.get("arc_deg", 0)])
     return cb.getvalue()
-
-def _generate_driver_code(rid, robot_pts, ns):
-    """Build a self-contained run_robot_<rid>.py with embedded PATH + POLE_POSITIONS."""
-    robots_cfg = ns.get("ROBOTS", {})
-    cfg       = robots_cfg.get(rid, {})
-    poles     = ns.get("POLES", {})
-    arc_r     = ns.get("ARC_R", 58)
-    direction = cfg.get("dir", "ccw")
-    circles   = cfg.get("circles", 1)
-    start     = cfg.get("start", [0, 0])
-    seq       = cfg.get("seq", [])
-
-    sx, sy = start[0], start[1]
-    local = [{"x": round(p["x"] - sx, 4), "y": round(p["y"] - sy, 4),
-              "type": p["type"], "pole": p["pole"],
-              "arc_deg": p.get("arc_deg", 0)} for p in robot_pts]
-
-    path_body = []
-    for p in local:
-        path_body.append('    {"x": ' + str(p["x"]) + ', "y": ' + str(p["y"]) +
-                         ', "type": "' + p["type"] + '", "pole": ' + str(p["pole"]) +
-                         ', "arc_deg": ' + str(p["arc_deg"]) + '},')
-    path_literal = "[\\n" + "\\n".join(path_body) + "\\n]"
-
-    # POLE_POSITIONS in robot-local frame, only for poles this robot visits.
-    used = sorted({int(pid) for pid in seq})
-    pole_body = []
-    for pid in used:
-        key = pid if pid in poles else str(pid)
-        if key not in poles:
-            continue
-        px, py = poles[key]
-        pole_body.append("    " + str(pid) + ": (" +
-                         str(round(px - sx, 4)) + ", " +
-                         str(round(py - sy, 4)) + "),")
-    poles_literal = "{\\n" + "\\n".join(pole_body) + "\\n}"
-
-    arc_cmd = "arc_left" if direction == "ccw" else "arc_right"
-    if rid == "A":
-        light_rgb, color_name = "0, 255, 0", "Green"
-    else:
-        light_rgb, color_name = "0, 0, 255", "Blue"
-
-    L = []
-    L.append('"""')
-    L.append('run_robot_' + rid + '.py  (auto-generated)')
-    L.append('=====================================================')
-    L.append('Path is embedded below - no CSV file needed.')
-    L.append('Re-run compute_path.py or use the website to regenerate.')
-    L.append('')
-    L.append('TWO WRAPPING MODES - change WRAP_MODE to swap:')
-    L.append('  "arc"      = ' + arc_cmd + ' using computed sweep angle (fast, more accurate)')
-    L.append('  "navigate" = follow reduced waypoints via navigate_to (slow, most accurate)')
-    L.append('"""')
-    L.append('')
-    L.append('from irobot_edu_sdk.backend.bluetooth import Bluetooth')
-    L.append('from irobot_edu_sdk.robots import event, Create3')
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# CONFIG')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('DIR     = "' + direction + '"')
-    L.append('CIRCLES = ' + str(circles))
-    L.append('ARC_R   = ' + str(arc_r))
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# WRAPPING MODE - CHANGE THIS TO SWAP')
-    L.append('# ==================================================================')
-    L.append('WRAP_MODE = "arc"')
-    L.append('# WRAP_MODE = "navigate"')
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# POLE POSITIONS  (local frame: world coords minus robot start)')
-    L.append('# Available for any pole-aware logic you want to add.')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('POLE_POSITIONS = ' + poles_literal)
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# EMBEDDED PATH  (' + str(len(local)) + ' waypoints, reduced for robot)')
-    L.append('# arc_deg: total sweep angle for each pole wrap (on first wrap pt)')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('PATH = ' + path_literal)
-    L.append('')
-    L.append('# ==================================================================')
-    L.append('# ROBOT DRIVER')
-    L.append('# ==================================================================')
-    L.append('')
-    L.append('robot = Create3(Bluetooth())')
-    L.append('')
-    L.append('')
-    L.append('@event(robot.when_play)')
-    L.append('async def play(robot):')
-    L.append('    await robot.reset_navigation()')
-    L.append('    await robot.set_lights_on_rgb(' + light_rgb + ')       # ' + color_name + ' = Robot ' + rid)
-    L.append('')
-    L.append('    print("Robot ' + rid + ' | dir=" + DIR + " mode=" + WRAP_MODE + " | " + str(len(PATH)) + " waypoints")')
-    L.append('')
-    L.append('    current_pole = None')
-    L.append('')
-    L.append('    for i, pt in enumerate(PATH):')
-    L.append('        if pt["type"] == "start":')
-    L.append('            continue')
-    L.append('')
-    L.append('        if pt["type"] == "move":')
-    L.append('            if pt["pole"] != current_pole:')
-    L.append('                current_pole = pt["pole"]')
-    L.append('                print("\\\\n--- Heading to Pole " + str(current_pole) + " ---")')
-    L.append('            await robot.navigate_to(pt["x"], pt["y"])')
-    L.append('')
-    L.append('        elif pt["type"] == "wrap":')
-    L.append('')
-    L.append('            # ARC MODE')
-    L.append('            if WRAP_MODE == "arc":')
-    L.append('                prev = PATH[i - 1] if i > 0 else None')
-    L.append('                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:')
-    L.append('                    await robot.set_lights_spin_rgb(255, 115, 0)')
-    L.append('                    sweep = pt.get("arc_deg", 360)')
-    L.append('                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [arc mode, " + str(round(sweep, 1)) + " deg]")')
-    L.append('                    await robot.' + arc_cmd + '(sweep, ARC_R)')
-    L.append('                    await robot.set_lights_on_rgb(' + light_rgb + ')')
-    L.append('                    print("  Done wrapping pole " + str(pt["pole"]))')
-    L.append('                continue')
-    L.append('')
-    L.append('            # NAVIGATE MODE')
-    L.append('            elif WRAP_MODE == "navigate":')
-    L.append('                prev = PATH[i - 1] if i > 0 else None')
-    L.append('                if prev is None or prev["type"] != "wrap" or prev["pole"] != pt["pole"]:')
-    L.append('                    await robot.set_lights_spin_rgb(255, 115, 0)')
-    L.append('                    print("  Wrapping pole " + str(pt["pole"]) + " (" + DIR + ") [navigate mode]")')
-    L.append('')
-    L.append('                await robot.navigate_to(pt["x"], pt["y"])')
-    L.append('')
-    L.append('                nxt = PATH[i + 1] if i + 1 < len(PATH) else None')
-    L.append('                if nxt is None or nxt["type"] != "wrap" or nxt["pole"] != pt["pole"]:')
-    L.append('                    await robot.set_lights_on_rgb(' + light_rgb + ')')
-    L.append('                    print("  Done wrapping pole " + str(pt["pole"]))')
-    L.append('')
-    L.append('    await robot.set_lights_blink_rgb(255, 255, 255)')
-    L.append('    await robot.play_note(440, 0.5)')
-    L.append('    await robot.play_note(880, 0.5)')
-    L.append('    await robot.stop_sound()')
-    L.append('    print("\\\\nRobot ' + rid + ' complete!")')
-    L.append('')
-    L.append('robot.play()')
-    L.append('')
-    return "\\n".join(L)
 
 def _extract_cfg(ns):
     """Extract serializable config values from a namespace."""
@@ -389,16 +211,17 @@ def run_compute_path_unified(code_str):
         exec(code_str, ns)
         sys.stdout = old; stdout_text = cap.getvalue()
 
-        if 'build_path' not in ns:
-            return json.dumps({"error": "No build_path(rid) found in compute_path.py",
-                               "stdout": stdout_text})
+        for name in ('build_path', 'reduce_for_robot',
+                     'robot_csv_text', 'run_config_text'):
+            if name not in ns:
+                return json.dumps({"error": "compute_path.py is missing " + name + "()",
+                                   "stdout": stdout_text})
         if 'ROBOTS' not in ns:
             return json.dumps({"error": "No ROBOTS dict found in compute_path.py",
                                "stdout": stdout_text})
 
-        wrap_step = ns.get('ROBOT_WRAP_STEP', 10)
-        cfg_all   = _extract_cfg(ns)
-        results   = {}
+        cfg_all = _extract_cfg(ns)
+        results = {}
 
         for rid in ("A", "B"):
             wps = ns['build_path'](rid)
@@ -410,7 +233,7 @@ def run_compute_path_unified(code_str):
                                 "type": str(wp[2]) if len(wp) > 2 else "move",
                                 "pole": int(wp[3]) if len(wp) > 3 else 0,
                                 "arc_deg": 0})
-            robot_pts = _reduce_for_robot(pts, wrap_step)
+            robot_pts = ns['reduce_for_robot'](pts)
 
             total = sum(
                 math.hypot(pts[i]["x"] - pts[i-1]["x"], pts[i]["y"] - pts[i-1]["y"])
@@ -420,8 +243,8 @@ def run_compute_path_unified(code_str):
             results[rid] = {
                 "waypoints":       pts,
                 "csv":             _pts_to_csv(pts),
-                "csv_robot":       _pts_to_csv(robot_pts),
-                "driver_code":     _generate_driver_code(rid, robot_pts, ns),
+                "csv_robot":       ns['robot_csv_text'](rid, robot_pts),
+                "run_config":      ns['run_config_text'](rid, robot_pts),
                 "robot_pts_count": len(robot_pts),
                 "total_distance":  total,
             }
@@ -673,15 +496,15 @@ async function rebuildFromPython(){
     if(rB.csv)await writeFileToDisk('path_B.csv',rB.csv);
     if(rA.csv_robot)await writeFileToDisk('path_A_robot.csv',rA.csv_robot);
     if(rB.csv_robot)await writeFileToDisk('path_B_robot.csv',rB.csv_robot);
-    if(rA.driver_code)await writeFileToDisk('run_robot_A.py',rA.driver_code);
-    if(rB.driver_code)await writeFileToDisk('run_robot_B.py',rB.driver_code);
+    if(rA.run_config)await writeFileToDisk('run_config_A.json',rA.run_config);
+    if(rB.run_config)await writeFileToDisk('run_config_B.json',rB.run_config);
 
     logPyOutput(`✓ A: ${pA.length} wpts, ${Math.round(tA)} cm | robot: ${rA.robot_pts_count} wpts`);
     logPyOutput(`✓ B: ${pB.length} wpts, ${Math.round(tB)} cm | robot: ${rB.robot_pts_count} wpts`);
     logPyOutput(`✓ Config: ${Object.keys(POLES).length} poles, ARC_R=${ARC_R}`);
     logPyOutput(`✓ A start=(${ROBOTS.A.start}) seq=[${ROBOTS.A.seq}] dir=${ROBOTS.A.dir}`);
     logPyOutput(`✓ B start=(${ROBOTS.B.start}) seq=[${ROBOTS.B.seq}] dir=${ROBOTS.B.dir}`);
-    document.getElementById('statusText').textContent=`A: ${Math.round(tA)}cm (${rA.robot_pts_count}pts)  B: ${Math.round(tB)}cm (${rB.robot_pts_count}pts) — CSV + drivers ✓`;
+    document.getElementById('statusText').textContent=`A: ${Math.round(tA)}cm (${rA.robot_pts_count}pts)  B: ${Math.round(tB)}cm (${rB.robot_pts_count}pts) — CSV + run_config ✓`;
     document.getElementById('badgePy').textContent='🐍 Pyodide ✓';
   }catch(e){logPyOutput('Error: '+e.message,true);document.getElementById('statusText').textContent='Python error: '+e.message;document.getElementById('badgePy').textContent='🐍 Error';console.error(e)}
 }

@@ -25,7 +25,7 @@ POLES = {
 
 POLE_R  = 5
 ROBOT_R = 33
-SAFETY  = 20
+SAFETY  = 15
 ARC_R   = POLE_R + ROBOT_R + SAFETY
 
 # ==================================================================

@@ -25,7 +25,7 @@ POLES = {
 
 POLE_R  = 5
 ROBOT_R = 33
-SAFETY  = 20
+SAFETY  = 15
 ARC_R   = POLE_R + ROBOT_R + SAFETY
 
 # ==================================================================
@@ -34,7 +34,7 @@ ARC_R   = POLE_R + ROBOT_R + SAFETY
 
 RID     = "A"
 START   = (0, 0)
-SEQ     = [1, 2, 1, 4]
+SEQ     = [1, 4]
 DIR     = "ccw"
 CIRCLES = 1
 SIGN    = 1          # ccw = +1
