@@ -17,8 +17,9 @@ Usage:
 Simulates (x, y, heading) state in the same units/convention as the real
 Create 3 SDK:
   - x, y in centimeters
-  - heading in degrees, 0 = +x axis, 90 = +y axis (math convention)
-  - reset_navigation() sets state to (0, 0, 0)
+  - heading in degrees, math convention (0° = +x axis, 90° = +y axis)
+  - reset_navigation() sets state to (0, 0, 90°) — matches the real SDK,
+    where +y is "forward" out of the robot's bumper.
 
 Every move/turn/arc updates state and prints what the robot "would" do.
 At the end of play(), you can read robot.trajectory for the full (x,y,h)
@@ -67,8 +68,8 @@ class MockCreate3:
     def __init__(self):
         self.x = 0.0
         self.y = 0.0
-        self.heading = 0.0   # degrees, math convention
-        self.trajectory = [(0.0, 0.0, 0.0)]   # list of (x, y, heading) snapshots
+        self.heading = 90.0   # degrees; matches real SDK reset state
+        self.trajectory = [(0.0, 0.0, 90.0)]   # list of (x, y, heading) snapshots
         self.when_play = _PlayTrigger()
 
     # ----- internal helpers -----
@@ -85,8 +86,8 @@ class MockCreate3:
     async def reset_navigation(self):
         self.x = 0.0
         self.y = 0.0
-        self.heading = 0.0
-        self.trajectory = [(0.0, 0.0, 0.0)]
+        self.heading = 90.0
+        self.trajectory = [(0.0, 0.0, 90.0)]
         self._log_pose("reset_navigation")
 
     async def move(self, distance_cm):

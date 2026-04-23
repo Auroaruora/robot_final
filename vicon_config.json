@@ -1,0 +1,8 @@
+{
+  "host": "169.254.217.218",
+  "subjects": {
+    "A": "robotA",
+    "B": "robotB"
+  },
+  "correction_threshold_cm": 5.0
+}
