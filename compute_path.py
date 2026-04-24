@@ -27,13 +27,13 @@ POLES = {
     1: (   0,   75),
     2: (-100, -200),
     3: (-120,  120),
-    4: ( 175,   70),
+    4: ( 175,   75),
     5: ( 150, -150),
 }
 
 POLE_R  = 5
 ROBOT_R = 33
-SAFETY  = 20
+SAFETY  = 15
 ARC_R   = POLE_R + ROBOT_R + SAFETY
 
 # ==================================================================
@@ -45,7 +45,7 @@ ARC_R   = POLE_R + ROBOT_R + SAFETY
 ROBOTS = {
     "A": {
         "start":   (0, 0),
-        "seq":     [1, 4, 2],
+        "seq":     [1, 4],
         "dir":     "ccw",
         "circles": 1,
     },
@@ -63,7 +63,7 @@ ROBOTS = {
 # run_robot.py can do Create3(Bluetooth(address=...)) deterministically.
 BLUETOOTH_ADDRESSES = {
     "A": "38E42E1C-5EA3-F705-C05D-43EB8600C88B",
-    "B": "REPLACE-WITH-ROBOT-B-ADDRESS",
+    "B": "BA5D90F5-FF5D-4870-0CCD-5034A75EE39F",
 }
 
 # How aggressively to reduce wrap-arc points for the robot driver.

@@ -34,7 +34,7 @@ import csv, json, math, os, time
 ROBOT_ID   = "A"
 WRAP_MODE  = "arc"         # "arc" | "navigate"
 USE_VICON  = True         # False -> skip all Vicon reads + corrections
-MOCK_ROBOT = True         # True  -> MockCreate3 instead of real Bluetooth Create3
+MOCK_ROBOT = False         # True  -> MockCreate3 instead of real Bluetooth Create3
 
 # ==================================================================
 # CONDITIONAL IMPORTS (Bluetooth/Create3 vs mock)
@@ -135,6 +135,34 @@ class ViconPoseSource:
         h_local = _wrap180(yaw + self.rot_deg)
         return (x_local_mm / 10.0, y_local_mm / 10.0, h_local)
 
+    def rebase_to(self, target_x_cm, target_y_cm):
+        """Shift the origin of the local frame so that the CURRENT Vicon
+        reading reports as (target_x_cm, target_y_cm). Rotation is
+        unchanged — only translation is adjusted. Returns True on
+        success, False if no frame is available.
+        """
+        frame = self.client.latest_frame
+        if frame is None:
+            return False
+        body = frame.subject(self.subject)
+        if body is None or body.occluded:
+            return False
+        bx = float(body.position[0])
+        by = float(body.position[1])
+        # Solve sx_mm, sy_mm so that with this body.position the
+        # transform returns (target_x_cm, target_y_cm).
+        #   cos*(bx - sx) - sin*(by - sy) = target_x_cm * 10
+        #   sin*(bx - sx) + cos*(by - sy) = target_y_cm * 10
+        # Let u = bx - sx, v = by - sy. The 2x2 is a rotation, inverse
+        # is its transpose:
+        tx = target_x_cm * 10.0
+        ty = target_y_cm * 10.0
+        u =  self._cos * tx + self._sin * ty
+        v = -self._sin * tx + self._cos * ty
+        self.sx_mm = bx - u
+        self.sy_mm = by - v
+        return True
+
 
 class MockPoseSource:
     """Returns the mock robot's own simulated pose — perfect tracking.
@@ -142,9 +170,20 @@ class MockPoseSource:
 
     def __init__(self, mock_robot):
         self._mock = mock_robot
+        self._off_x = 0.0
+        self._off_y = 0.0
 
     def get_pose_local(self):
-        return (self._mock.x, self._mock.y, self._mock.heading)
+        return (self._mock.x + self._off_x,
+                self._mock.y + self._off_y,
+                self._mock.heading)
+
+    def rebase_to(self, target_x_cm, target_y_cm):
+        """Shift the reported-pose offset so that the current reading
+        maps to (target_x_cm, target_y_cm). Mirrors ViconPoseSource."""
+        self._off_x = target_x_cm - self._mock.x
+        self._off_y = target_y_cm - self._mock.y
+        return True
 
 
 # ==================================================================
@@ -196,9 +235,19 @@ elif not USE_VICON:
 # ==================================================================
 
 async def correct_pose(robot, pose_src, label, pt, next_pt, threshold_cm):
-    """If Vicon says we're > threshold off expected (pt.x, pt.y), turn
-    to face the expected spot and drive there. Then, if next_pt is
-    given, turn once more to face the next leg.
+    """Two regimes, gated by ``threshold_cm``:
+
+    - err > threshold  -> PHYSICAL correction: turn toward (pt.x, pt.y),
+                          move by the error distance, then verify.
+    - err <= threshold -> COORDINATE RE-ZERO: don't move the robot. Shift
+                          the pose source's local-frame origin so the
+                          current Vicon reading now reports as (pt.x,
+                          pt.y). Any new drift after this point is
+                          measured freshly; it only triggers a physical
+                          correction if it grows past threshold on a
+                          later checkpoint.
+
+    Then, if next_pt is given, turn to face the next leg.
 
     Prints useful location info before and after.
     """
@@ -216,13 +265,14 @@ async def correct_pose(robot, pose_src, label, pt, next_pt, threshold_cm):
 
     print("  [pose " + label + "] expected=(" + f"{ex:+.1f}, {ey:+.1f}" +
           ") vicon=(" + f"{ax:+.1f}, {ay:+.1f}, {ah:+.1f}°" +
-          ") err=" + f"{err:.1f}" + " cm")
+          ") err=" + f"{err:.2f}" + " cm")
 
     if err > threshold_cm:
         target_dir = math.degrees(math.atan2(dy, dx))
         turn_delta = _wrap180(target_dir - ah)
-        print("  [correct " + label + "] turn " + f"{turn_delta:+.1f}°" +
-              " then move " + f"{err:.1f}" + " cm")
+        print("  [correct " + label + "] over threshold (" +
+              f"{threshold_cm:.1f}" + " cm) — turn " +
+              f"{turn_delta:+.1f}°" + " then move " + f"{err:.2f}" + " cm")
         if abs(turn_delta) > 0.5:
             if turn_delta >= 0:
                 await robot.turn_left(turn_delta)
@@ -237,12 +287,24 @@ async def correct_pose(robot, pose_src, label, pt, next_pt, threshold_cm):
             px, py, ph = post
             perr = math.hypot(ex - px, ey - py)
             print("  [pose " + label + " post] vicon=(" +
-                  f"{px:+.1f}, {py:+.1f}, {ph:+.1f}°" +
-                  ") residual=" + f"{perr:.1f}" + " cm")
+                  f"{px:+.2f}, {py:+.2f}, {ph:+.1f}°" +
+                  ") residual=" + f"{perr:.2f}" + " cm")
             ax, ay, ah = px, py, ph
     else:
-        print("  [correct " + label + "] within threshold (" +
-              f"{threshold_cm:.1f}" + " cm) — no move")
+        # Below threshold: don't move. Re-zero the coordinate frame so
+        # (ex, ey) is the new "here", then let the next checkpoint
+        # measure any additional drift from this fresh baseline.
+        ok = pose_src.rebase_to(ex, ey)
+        if ok:
+            print("  [correct " + label + "] within threshold (" +
+                  f"{threshold_cm:.1f}" + " cm) — re-zeroed local frame "
+                  "(robot did not move; now reports as expected)")
+            # Our locally-held ax, ay now match ex, ey after the rebase;
+            # heading unchanged.
+            ax, ay = ex, ey
+        else:
+            print("  [correct " + label + "] within threshold (" +
+                  f"{threshold_cm:.1f}" + " cm) — rebase failed, no move")
 
     # Optional heading alignment for the next leg
     if next_pt is not None:
@@ -285,11 +347,29 @@ async def play(robot):
                 print("[vicon] start calibration: " +
                       "vicon_world=(" + f"{start_pos_mm[0]:+.1f}, {start_pos_mm[1]:+.1f}" +
                       ") mm | yaw=" + f"{start_yaw:+.1f}°")
+
+    # reset_navigation just put the SDK odometry at (0, 0, 90°), so the
+    # robot's coordinate origin is "right here, right now". Lock the Vicon
+    # local frame to that same zero: if the current Vicon reading isn't
+    # exactly (0, 0) — frame latency, marker noise, or any drift between
+    # pose-source construction and this first read — rebase so the current
+    # position maps to (0, 0). Waypoints and Vicon readings stay in sync
+    # for the rest of the run.
+    if pose_src is not None:
+        p0 = pose_src.get_pose_local()
+        if p0 is None:
+            print("[vicon] WARNING: no pose at startup — cannot zero origin")
+        else:
+            ox, oy, oh = p0
+            off = math.hypot(ox, oy)
+            if off > 1e-6:
+                print("[vicon] startup offset from (0, 0): (" +
+                      f"{ox:+.2f}, {oy:+.2f}" + ") cm — rebasing origin")
+                pose_src.rebase_to(0.0, 0.0)
                 p0 = pose_src.get_pose_local()
-                if p0:
-                    print("[vicon] local frame check at startup: " +
-                          "(" + f"{p0[0]:+.2f}, {p0[1]:+.2f}, {p0[2]:+.1f}°" +
-                          ") — should be near (0, 0, 90°)")
+            if p0 is not None:
+                print("[vicon] origin locked: (" +
+                      f"{p0[0]:+.3f}, {p0[1]:+.3f}, {p0[2]:+.1f}°" + ")")
 
     print("Robot " + CFG["rid"] +
           " | dir=" + CFG["dir"] +

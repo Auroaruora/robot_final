@@ -2,7 +2,7 @@
   "rid": "B",
   "dir": "cw",
   "arc_cmd": "arc_right",
-  "arc_r": 58,
+  "arc_r": 53,
   "circles": 1,
   "light_rgb": [
     0,
@@ -24,7 +24,7 @@
     200
   ],
   "path_csv": "path_B_robot.csv",
-  "bluetooth_address": "REPLACE-WITH-ROBOT-B-ADDRESS",
+  "bluetooth_address": "BA5D90F5-FF5D-4870-0CCD-5034A75EE39F",
   "waypoint_count": 153,
-  "total_distance_cm": 5641.66
+  "total_distance_cm": 5294.19
 }
