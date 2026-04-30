@@ -89,10 +89,11 @@
   </div>
   <div class="ctl">
     <button class="pbtn" id="playBtn" onclick="togglePlay()">▶</button>
-    <div class="sctl">Spd <input type="range" id="spdSlider" min="1" max="20" value="5"></div>
+    <div class="sctl">Spd ×<span id="spdLabel">5</span> <input type="range" id="spdSlider" min="1" max="30" value="5" oninput="document.getElementById('spdLabel').textContent=this.value"></div>
     <button class="btn sm" onclick="resetAnim()">Reset</button>
     <div class="chip">A: <b id="statA">0</b> cm</div>
     <div class="chip">B: <b id="statB">0</b> cm</div>
+    <div class="chip">t: <b id="statT">0</b> s</div>
     <div class="smsg" id="statusText">Loading Pyodide…</div>
   </div>
 </div>
@@ -211,6 +212,7 @@ def run_compute_path_unified(code_str):
 
             results[rid] = {
                 "waypoints":       pts,
+                "robot_waypoints": robot_pts,
                 "csv":             _pts_to_csv(pts),
                 "csv_robot":       ns['robot_csv_text'](rid, robot_pts),
                 "run_config":      ns['run_config_text'](rid, robot_pts),
@@ -420,10 +422,15 @@ async function rebuildFromPython(){
 
     syncStateFromPythonConfig(res.config||null);
     const rA=res.results.A, rB=res.results.B;
-    pA=rA.waypoints.map(w=>({x:w.x,y:w.y,type:w.type,pole:w.pole}));
-    pB=rB.waypoints.map(w=>({x:w.x,y:w.y,type:w.type,pole:w.pole}));
+    // Animate the reduced (path_<rid>_robot.csv) waypoints — the same list
+    // run_robot.py / run_both.py drive via navigate_to, so the simulation
+    // matches the real robot's stop-at-each-waypoint motion.
+    const wpA=rA.robot_waypoints||rA.waypoints, wpB=rB.robot_waypoints||rB.waypoints;
+    pA=wpA.map(w=>({x:w.x,y:w.y,type:w.type,pole:w.pole}));
+    pB=wpB.map(w=>({x:w.x,y:w.y,type:w.type,pole:w.pole}));
     cA=pDist(pA);cB=pDist(pB);tA=cA[cA.length-1]||0;tB=cB[cB.length-1]||0;
-    dA=0;dB=0;trA=[];trB=[];recalcView();draw();
+    profileA=buildProfile(pA);profileB=buildProfile(pB);
+    timeA=0;timeB=0;simT=0;dA=0;dB=0;trA=[];trB=[];lastTs=null;recalcView();draw();
 
     // Save all output files into robot_info/
     if(rA.csv)await writeFileToDisk('path_A.csv',rA.csv);
@@ -433,7 +440,8 @@ async function rebuildFromPython(){
     if(rA.run_config)await writeFileToDisk('run_config_A.json',rA.run_config);
     if(rB.run_config)await writeFileToDisk('run_config_B.json',rB.run_config);
 
-    document.getElementById('statusText').textContent=`A: ${Math.round(tA)}cm (${rA.robot_pts_count}pts)  B: ${Math.round(tB)}cm (${rB.robot_pts_count}pts) — CSV + run_config ✓`;
+    const etaA=profileA?profileA.totalT:0, etaB=profileB?profileB.totalT:0;
+    document.getElementById('statusText').textContent=`A: ${Math.round(tA)}cm/${etaA.toFixed(0)}s  B: ${Math.round(tB)}cm/${etaB.toFixed(0)}s — slider × real-time`;
     document.getElementById('badgePy').textContent='🐍 Pyodide ✓';
   }catch(e){console.error(e);document.getElementById('statusText').textContent='Python error: '+e.message;document.getElementById('badgePy').textContent='🐍 Error'}
 }
@@ -447,17 +455,89 @@ function addPole(){POLES[getMaxPoleId()+1]=[0,0];renderPoleGrid()}
 function delPole(id){if(+id!==getMaxPoleId())return;delete POLES[id];for(const rid of['A','B']){const s=document.getElementById(rid==='A'?'aSeq':'bSeq');s.value=s.value.split(',').map(s=>s.trim()).filter(s=>+s!==+id).join(',')}renderPoleGrid()}
 
 // ═══════════════════════════════════════════════════════
-// JS HELPERS (animation only)
+// CREATE 3 MOTION MODEL
+// Each navigate_to call: rotate-in-place to face target, then drive
+// with a trapezoidal accel/cruise/decel velocity profile, ending at
+// zero velocity. The simulation advances in real wall-clock seconds
+// scaled by the slider, so A vs B keep the same relative timing as
+// the real robots.
 // ═══════════════════════════════════════════════════════
+const LIN_V_MAX = 15;                  // cm/s
+const LIN_A     = 30;                  // cm/s^2
+const ANG_V_MAX = 75 * Math.PI/180;    // rad/s
+const ANG_A     = 300 * Math.PI/180;   // rad/s^2
+const INIT_HEADING = 0;                // facing +x after reset_navigation()
+
 function dd(x1,y1,x2,y2){return Math.hypot(x2-x1,y2-y1)}
 function pDist(pts){let c=[0];for(let i=1;i<pts.length;i++)c.push(c[i-1]+dd(pts[i-1].x,pts[i-1].y,pts[i].x,pts[i].y));return c}
-function pAt(pts,c,d){d=Math.max(0,Math.min(d,c[c.length-1]));for(let i=1;i<c.length;i++){if(d<=c[i]){let s=c[i]-c[i-1],t=s>0?(d-c[i-1])/s:0;return{x:pts[i-1].x+(pts[i].x-pts[i-1].x)*t,y:pts[i-1].y+(pts[i].y-pts[i-1].y)*t,seg:pts[i]}}}let l=pts[pts.length-1];return{x:l.x,y:l.y,seg:l}}
+
+function trapTime(L, v, a){
+  if(L<=0)return 0;
+  const ta=v/a, da=0.5*a*ta*ta;
+  if(2*da>=L)return 2*Math.sqrt(L/a);
+  return 2*ta + (L-2*da)/v;
+}
+function trapDist(t, L, v, a){
+  if(L<=0||t<=0)return 0;
+  const ta=v/a, da=0.5*a*ta*ta;
+  if(2*da>=L){
+    const tp=Math.sqrt(L/a);
+    if(t>=2*tp)return L;
+    if(t<=tp)return 0.5*a*t*t;
+    const td=t-tp, vp=a*tp;
+    return L/2 + vp*td - 0.5*a*td*td;
+  }
+  const cr=(L-2*da)/v;
+  if(t>=2*ta+cr)return L;
+  if(t<=ta)return 0.5*a*t*t;
+  if(t<=ta+cr)return da + v*(t-ta);
+  const td=t-ta-cr;
+  return da + v*cr + v*td - 0.5*a*td*td;
+}
+function buildProfile(pts){
+  const segs=[];
+  let heading=INIT_HEADING, t=0, cum=0;
+  for(let i=1;i<pts.length;i++){
+    const sx=pts[i-1].x, sy=pts[i-1].y, ex=pts[i].x, ey=pts[i].y;
+    const dx=ex-sx, dy=ey-sy, L=Math.hypot(dx,dy);
+    const target=(L>1e-6)?Math.atan2(dy,dx):heading;
+    let rot=target-heading;
+    while(rot>Math.PI)rot-=2*Math.PI;
+    while(rot<=-Math.PI)rot+=2*Math.PI;
+    const rotT=trapTime(Math.abs(rot), ANG_V_MAX, ANG_A);
+    const drvT=trapTime(L, LIN_V_MAX, LIN_A);
+    segs.push({t0:t, rotT, drvT, sx, sy, ex, ey, len:L, cum0:cum, seg:pts[i]});
+    t+=rotT+drvT; cum+=L; heading=target;
+  }
+  return {segs, totalT:t, totalL:cum};
+}
+function sampleProfile(profile, t){
+  const segs=profile.segs;
+  if(!segs.length)return {x:0,y:0,d:0,seg:null};
+  if(t>=profile.totalT){
+    const last=segs[segs.length-1];
+    return {x:last.ex, y:last.ey, d:profile.totalL, seg:last.seg};
+  }
+  for(const s of segs){
+    if(t<s.t0+s.rotT+s.drvT){
+      const local=t-s.t0;
+      if(local<=s.rotT)return {x:s.sx, y:s.sy, d:s.cum0, seg:s.seg};
+      const dt=local-s.rotT;
+      const d=trapDist(dt, s.len, LIN_V_MAX, LIN_A);
+      const f=s.len>0 ? d/s.len : 0;
+      return {x:s.sx+(s.ex-s.sx)*f, y:s.sy+(s.ey-s.sy)*f, d:s.cum0+d, seg:s.seg};
+    }
+  }
+  const last=segs[segs.length-1];
+  return {x:last.ex, y:last.ey, d:profile.totalL, seg:last.seg};
+}
 
 // ═══════════════════════════════════════════════════════
 // CANVAS
 // ═══════════════════════════════════════════════════════
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 let W,H,pA=[],pB=[],cA=[],cB=[],tA=0,tB=0,dA=0,dB=0,trA=[],trB=[],playing=false,aId=null;
+let profileA=null, profileB=null, timeA=0, timeB=0, simT=0, lastTs=null;
 const CA='#2b9e4f',CB='#2872cc',CP='#c95428';
 let vCx=0,vCy=0,vS=1.8;
 
@@ -476,17 +556,46 @@ function draw(){
   ghost(pA,CA);ghost(pB,CB);
   function trail(tr,col){if(tr.length<2)return;ctx.strokeStyle=col;ctx.globalAlpha=.22;ctx.lineWidth=1.8;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(...toS(tr[0][0],tr[0][1]));for(let i=1;i<tr.length;i++)ctx.lineTo(...toS(tr[i][0],tr[i][1]));ctx.stroke();ctx.globalAlpha=1;let t=tr.slice(-60);if(t.length>1){ctx.strokeStyle=col;ctx.lineWidth=2.8;ctx.beginPath();ctx.moveTo(...toS(t[0][0],t[0][1]));for(let i=1;i<t.length;i++)ctx.lineTo(...toS(t[i][0],t[i][1]));ctx.stroke()}}
   trail(trA,CA);trail(trB,CB);
-  function bot(pts,cum,d,col,lbl){if(!pts.length||d<0)return null;let{x,y,seg}=pAt(pts,cum,d);let[sx,sy]=toS(x,y),r=Math.max(ROBOT_R*vS*.45,6);ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.fillStyle=col;ctx.globalAlpha=.25;ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#fff';ctx.font='bold 9px "IBM Plex Sans"';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(lbl,sx,sy);return seg}
-  let sA=bot(pA,cA,dA,CA,'A'),sB=bot(pB,cB,dB,CB,'B');
+  function bot(profile,t,col,lbl){if(!profile||!profile.segs.length)return null;const s=sampleProfile(profile,t);const[sx,sy]=toS(s.x,s.y),r=Math.max(ROBOT_R*vS*.45,6);ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.fillStyle=col;ctx.globalAlpha=.25;ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#fff';ctx.font='bold 9px "IBM Plex Sans"';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(lbl,sx,sy);return s.seg}
+  let sA=bot(profileA,timeA,CA,'A'),sB=bot(profileB,timeB,CB,'B');
   document.getElementById('badgeA').textContent=sA?(sA.type==='wrap'?`A: wrap ${sA.pole}`:`A: → ${sA.pole}`):'A: —';
   document.getElementById('badgeB').textContent=sB?(sB.type==='wrap'?`B: wrap ${sB.pole}`:`B: → ${sB.pole}`):'B: —';
   document.getElementById('statA').textContent=Math.round(dA);document.getElementById('statB').textContent=Math.round(dB);
+  document.getElementById('statT').textContent=simT.toFixed(1);
 }
 
 function resize(){let r=cv.parentElement.getBoundingClientRect();cv.width=r.width*devicePixelRatio;cv.height=r.height*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);W=r.width;H=r.height;recalcView();draw()}
-function animate(){let spd=+document.getElementById('spdSlider').value,cm_=spd*.9;if(dA<tA){dA=Math.min(dA+cm_,tA);let p=pAt(pA,cA,dA);trA.push([p.x,p.y])}if(dB<tB){dB=Math.min(dB+cm_,tB);let p=pAt(pB,cB,dB);trB.push([p.x,p.y])}draw();if(dA>=tA&&dB>=tB){playing=false;document.getElementById('playBtn').textContent='▶';document.getElementById('statusText').textContent='Complete ✓';return}if(playing)aId=requestAnimationFrame(animate)}
-function togglePlay(){if(!pA.length&&!pB.length)return;playing=!playing;document.getElementById('playBtn').textContent=playing?'⏸':'▶';if(playing)aId=requestAnimationFrame(animate);else if(aId)cancelAnimationFrame(aId)}
-function resetAnim(){playing=false;if(aId)cancelAnimationFrame(aId);document.getElementById('playBtn').textContent='▶';dA=0;dB=0;trA=[];trB=[];draw()}
+function animate(ts){
+  if(lastTs===null)lastTs=ts;
+  const dtMs=ts-lastTs; lastTs=ts;
+  const mult=+document.getElementById('spdSlider').value;
+  // Cap step at 100ms of real time so a tab refocus doesn't teleport the bots.
+  const dt=Math.min(dtMs,100)/1000*mult;
+  simT+=dt;
+  let activeA=false, activeB=false;
+  if(profileA && timeA<profileA.totalT){
+    timeA=Math.min(timeA+dt, profileA.totalT);
+    const s=sampleProfile(profileA, timeA);
+    trA.push([s.x, s.y]); dA=s.d;
+    activeA=timeA<profileA.totalT;
+  }
+  if(profileB && timeB<profileB.totalT){
+    timeB=Math.min(timeB+dt, profileB.totalT);
+    const s=sampleProfile(profileB, timeB);
+    trB.push([s.x, s.y]); dB=s.d;
+    activeB=timeB<profileB.totalT;
+  }
+  draw();
+  if(!activeA && !activeB){
+    playing=false;
+    document.getElementById('playBtn').textContent='▶';
+    document.getElementById('statusText').textContent=`Complete ✓ — sim ${simT.toFixed(1)}s`;
+    return;
+  }
+  if(playing)aId=requestAnimationFrame(animate);
+}
+function togglePlay(){if(!pA.length&&!pB.length)return;playing=!playing;document.getElementById('playBtn').textContent=playing?'⏸':'▶';if(playing){lastTs=null;aId=requestAnimationFrame(animate)}else if(aId)cancelAnimationFrame(aId)}
+function resetAnim(){playing=false;if(aId)cancelAnimationFrame(aId);document.getElementById('playBtn').textContent='▶';timeA=0;timeB=0;simT=0;dA=0;dB=0;trA=[];trB=[];lastTs=null;draw()}
 
 renderPoleGrid();window.addEventListener('resize',resize);resize();draw();
 </script>
