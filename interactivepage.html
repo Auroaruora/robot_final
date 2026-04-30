@@ -287,11 +287,12 @@ function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(
 async function writeFileToDisk(filename,text){
   if(!dirHandle)return false;
   try{
-    const h=await dirHandle.getFileHandle(filename,{create:true});
+    const sub=await dirHandle.getDirectoryHandle('robot_info',{create:true});
+    const h=await sub.getFileHandle(filename,{create:true});
     const w=await h.createWritable(); await w.write(text); await w.close();
-    logPyOutput(`✓ Saved ${filename}`);
+    logPyOutput(`✓ Saved robot_info/${filename}`);
     return true;
-  }catch(e){logPyOutput(`⚠ Could not save ${filename}: ${e.message}`,true);return false}
+  }catch(e){logPyOutput(`⚠ Could not save robot_info/${filename}: ${e.message}`,true);return false}
 }
 
 // ═══════════════════════════════════════════════════════

@@ -28,8 +28,8 @@ ROBOT_ID = "A"
 # WRAP MODE - how to draw the circle around the pole
 # Comment out one, leave the other active.
 # ==================================================================
-WRAP_MODE = "arc"
-# WRAP_MODE = "navigate"
+# WRAP_MODE = "arc"
+WRAP_MODE = "navigate"
 
 # ==================================================================
 # LOADERS

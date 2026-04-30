@@ -2,7 +2,7 @@
   "rid": "B",
   "dir": "cw",
   "arc_cmd": "arc_right",
-  "arc_r": 53,
+  "arc_r": 48,
   "circles": 1,
   "light_rgb": [
     0,
@@ -11,20 +11,25 @@
   ],
   "color_name": "Blue",
   "seq": [
-    3,
     2,
     5,
     4,
-    1,
+    2,
     5,
-    2
+    4,
+    2,
+    5,
+    4,
+    2,
+    5,
+    4
   ],
   "start_world": [
     -120,
-    200
+    -100
   ],
   "path_csv": "path_B_robot.csv",
   "bluetooth_address": "BA5D90F5-FF5D-4870-0CCD-5034A75EE39F",
-  "waypoint_count": 153,
-  "total_distance_cm": 5294.19
+  "waypoint_count": 276,
+  "total_distance_cm": 9332.72
 }

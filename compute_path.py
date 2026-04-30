@@ -1,7 +1,8 @@
 """
 compute_path.py  —  Unified path planner for Robot A and Robot B
 ==================================================================
-Single source of truth. Generates per-robot data files only:
+Single source of truth. Generates per-robot data files only
+(written into the robot_info/ subfolder):
   - path_<RID>.csv          (full waypoint list, WORLD frame, for debugging)
   - path_<RID>_robot.csv    (reduced waypoint list, LOCAL frame — what
                              run_robot.py loads at startup)
@@ -19,6 +20,10 @@ and run_config_text(rid, robot_pts).
 
 import math, csv, os, io, json
 
+# All generated CSV/JSON files live in this subfolder, alongside this script.
+# run_robot.py and run_both.py read from the same folder.
+ROBOT_INFO_DIR = "robot_info"
+
 # ==================================================================
 # WORLD CONFIGURATION  (shared by both robots)
 # ==================================================================
@@ -33,7 +38,7 @@ POLES = {
 
 POLE_R  = 5
 ROBOT_R = 33
-SAFETY  = 15
+SAFETY  = 10
 ARC_R   = POLE_R + ROBOT_R + SAFETY
 
 # ==================================================================
@@ -45,13 +50,13 @@ ARC_R   = POLE_R + ROBOT_R + SAFETY
 ROBOTS = {
     "A": {
         "start":   (0, 0),
-        "seq":     [1, 4],
+        "seq":     [1, 4, 5, 1, 4, 5, 1, 4, 5, 1, 4, 5],
         "dir":     "ccw",
         "circles": 1,
     },
     "B": {
-        "start":   (-120, 200),
-        "seq":     [3, 2, 5, 4, 1, 5, 2],
+        "start":   (-120, -100),
+        "seq":     [2, 5, 4, 2, 5, 4, 2, 5, 4, 2, 5, 4],
         "dir":     "cw",
         "circles": 1,
     },
@@ -286,7 +291,9 @@ def reduce_for_robot(pts, wrap_step=ROBOT_WRAP_STEP):
 # ==================================================================
 
 def save_csv(pts, filename):
-    filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ROBOT_INFO_DIR)
+    os.makedirs(out_dir, exist_ok=True)
+    filepath = os.path.join(out_dir, filename)
     with open(filepath, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["step", "x", "y", "type", "pole", "arc_deg"])
@@ -366,7 +373,8 @@ def run_config_text(rid, robot_pts):
 # ==================================================================
 
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ROBOT_INFO_DIR)
+    os.makedirs(out_dir, exist_ok=True)
     for rid in ("A", "B"):
         pts = build_path(rid)
         robot_pts = reduce_for_robot(pts)
@@ -378,11 +386,11 @@ def main():
 
         save_csv(pts, "path_" + rid + ".csv")
 
-        robot_csv_path = os.path.join(script_dir, "path_" + rid + "_robot.csv")
+        robot_csv_path = os.path.join(out_dir, "path_" + rid + "_robot.csv")
         with open(robot_csv_path, "w", newline="") as f:
             f.write(robot_csv_text(rid, robot_pts))
 
-        config_path = os.path.join(script_dir, "run_config_" + rid + ".json")
+        config_path = os.path.join(out_dir, "run_config_" + rid + ".json")
         with open(config_path, "w") as f:
             f.write(run_config_text(rid, robot_pts))
 
@@ -393,7 +401,9 @@ def main():
               " circles=" + str(cfg["circles"]))
         print("  full: " + str(len(pts)) + " wpts, " +
               str(round(total, 1)) + " cm | robot: " + str(len(robot_pts)) + " wpts")
-        print("  Saved path_" + rid + ".csv, path_" + rid + "_robot.csv, run_config_" + rid + ".json")
+        print("  Saved " + ROBOT_INFO_DIR + "/path_" + rid + ".csv, " +
+              ROBOT_INFO_DIR + "/path_" + rid + "_robot.csv, " +
+              ROBOT_INFO_DIR + "/run_config_" + rid + ".json")
 
 if __name__ == "__main__":
     main()
