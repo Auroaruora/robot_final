@@ -1,7 +1,7 @@
 {
   "rid": "A",
-  "dir": "ccw",
-  "arc_cmd": "arc_left",
+  "dir": "cw",
+  "arc_cmd": "arc_right",
   "arc_r": 48,
   "circles": 1,
   "light_rgb": [
@@ -12,24 +12,22 @@
   "color_name": "Green",
   "seq": [
     1,
-    4,
-    5,
+    3,
     1,
-    4,
-    5,
+    3,
     1,
-    4,
-    5,
+    3,
     1,
-    4,
-    5
+    3,
+    1,
+    3
   ],
   "start_world": [
     0,
     0
   ],
   "path_csv": "path_A_robot.csv",
-  "bluetooth_address": "38E42E1C-5EA3-F705-C05D-43EB8600C88B",
-  "waypoint_count": 276,
-  "total_distance_cm": 8615.35
+  "waypoint_count": 212,
+  "total_distance_cm": 5957.83,
+  "bluetooth_address": "BDAFD1BE-45FC-A601-E2B1-A0AD8A97AFB6"
 }

@@ -262,6 +262,29 @@ async function writeFileToDisk(filename,text){
   }catch(e){console.warn(`Could not save robot_info/${filename}:`,e);return false}
 }
 
+async function readFileFromDisk(filename){
+  if(!dirHandle)return null;
+  try{
+    const sub=await dirHandle.getDirectoryHandle('robot_info',{create:false});
+    const h=await sub.getFileHandle(filename,{create:false});
+    return await (await h.getFile()).text();
+  }catch(e){return null}
+}
+
+// run_config_<RID>.json's `bluetooth_address` is owned by setup_robots.py.
+// Compute-path output never sets it; we merge whatever address is already
+// on disk into the new JSON so re-running the planner doesn't clobber it.
+async function mergeRunConfig(filename,newJsonText){
+  let newCfg; try{newCfg=JSON.parse(newJsonText)}catch(e){return newJsonText}
+  let existingAddr="";
+  const old=await readFileFromDisk(filename);
+  if(old){
+    try{existingAddr=(JSON.parse(old).bluetooth_address)||""}catch(e){}
+  }
+  newCfg.bluetooth_address=existingAddr;
+  return JSON.stringify(newCfg,null,2);
+}
+
 async function writeComputePathFile(){
   if(!fileHandle||!fileContent)return false;
   try{const w=await fileHandle.createWritable();await w.write(fileContent);await w.close();return true}
@@ -437,8 +460,8 @@ async function rebuildFromPython(){
     if(rB.csv)await writeFileToDisk('path_B.csv',rB.csv);
     if(rA.csv_robot)await writeFileToDisk('path_A_robot.csv',rA.csv_robot);
     if(rB.csv_robot)await writeFileToDisk('path_B_robot.csv',rB.csv_robot);
-    if(rA.run_config)await writeFileToDisk('run_config_A.json',rA.run_config);
-    if(rB.run_config)await writeFileToDisk('run_config_B.json',rB.run_config);
+    if(rA.run_config)await writeFileToDisk('run_config_A.json',await mergeRunConfig('run_config_A.json',rA.run_config));
+    if(rB.run_config)await writeFileToDisk('run_config_B.json',await mergeRunConfig('run_config_B.json',rB.run_config));
 
     const etaA=profileA?profileA.totalT:0, etaB=profileB?profileB.totalT:0;
     document.getElementById('statusText').textContent=`A: ${Math.round(tA)}cm/${etaA.toFixed(0)}s  B: ${Math.round(tB)}cm/${etaB.toFixed(0)}s — slider × real-time`;

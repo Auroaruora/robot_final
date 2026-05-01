@@ -19,6 +19,12 @@ from irobot_edu_sdk.robots import event, Create3
 _NUM_ROBOTS = 2
 _start_barrier = asyncio.Barrier(_NUM_ROBOTS)
 
+# Finish counter — when every robot's play handler reaches the end, the
+# last one schedules loop.stop() so the SDK's run_forever() returns and
+# the process exits cleanly (exit code 0). Without this, robot.play()
+# would block forever after the robots are done.
+_done_count = 0
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 ROBOT_INFO_DIR = os.path.join(_HERE, "robot_info")
 
@@ -27,6 +33,11 @@ def load_run_config(rid):
     with open(os.path.join(ROBOT_INFO_DIR, "run_config_" + rid + ".json")) as f:
         cfg = json.load(f)
     cfg["light_rgb"] = tuple(cfg["light_rgb"])
+    if not cfg.get("bluetooth_address"):
+        raise SystemExit(
+            "Robot " + rid + " has no bluetooth_address in run_config_" + rid +
+            ".json. Run `python setup_robots.py` to pair the robots first."
+        )
     return cfg
 
 
@@ -101,6 +112,13 @@ def register_play(robot, cfg, path):
         await robot.play_note(880, 0.5)
         await robot.stop_sound()
         print("[" + rid + "] complete!")
+
+        # Single asyncio thread, so this is safe without a lock.
+        global _done_count
+        _done_count += 1
+        if _done_count >= _NUM_ROBOTS:
+            loop = asyncio.get_event_loop()
+            loop.call_later(0.5, loop.stop)
 
 
 # ---------- build both robots ----------

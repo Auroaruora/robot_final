@@ -50,30 +50,24 @@ ARC_R   = POLE_R + ROBOT_R + SAFETY
 ROBOTS = {
     "A": {
         "start":   (0, 0),
-        "seq":     [1, 4, 5, 1, 4, 5, 1, 4, 5, 1, 4, 5],
-        "dir":     "ccw",
+        "seq":     [1, 3, 1, 3, 1, 3, 1, 3, 1, 3],
+        "dir":     "cw",
         "circles": 1,
     },
     "B": {
         "start":   (-120, -100),
-        "seq":     [2, 5, 4, 2, 5, 4, 2, 5, 4, 2, 5, 4],
+        "seq":     [2, 3, 1, 4],
         "dir":     "cw",
         "circles": 1,
     },
 }
 
-# Per-robot Bluetooth (BLE) addresses. On macOS these are the
-# Create3's system-assigned UUID; on other platforms they may be
-# the Bluetooth MAC. Flowed through into run_config_<RID>.json so
-# run_robot.py can do Create3(Bluetooth(address=...)) deterministically.
-BLUETOOTH_ADDRESSES = {
-    "A": "38E42E1C-5EA3-F705-C05D-43EB8600C88B",
-    "B": "BA5D90F5-FF5D-4870-0CCD-5034A75EE39F",
-}
-
-# How aggressively to reduce wrap-arc points for the robot driver.
-# (Keep every Nth point within a pole's wrap group; first & last always kept.)
 ROBOT_WRAP_STEP = 10
+
+# Tuning knob: 
+#   0 (or any value <= 0)   -> no segmenting (our old version))
+#   start with 50 and try smaller number if is still inaccurate bump it up if you think is too slow.
+MAX_TRANSIT_SEGMENT_CM = 50
 
 # ==================================================================
 # GEOMETRY HELPERS
@@ -168,6 +162,34 @@ def safe_transit(sx, sy, gx, gy, skip_poles):
                 return [(w1x, w1y), (w2x, w2y), (gx, gy)]
     return [(mx + nx * ARC_R * 5, my + ny * ARC_R * 5), (gx, gy)]
 
+
+def slice_transit(start_x, start_y, route, max_seg=None):
+    """Insert intermediate waypoints so no straight leg is longer than
+    `max_seg` cm. Each (sx,sy) -> (gx,gy) segment becomes ceil(d/max_seg)
+    equal-length chunks. Setting max_seg <= 0 disables segmentation
+    (robot runs the leg in a single navigate_to call).
+
+    `route` is the list returned by safe_transit; we walk through it
+    starting at (start_x, start_y) and emit a new list with intermediates.
+    """
+    if max_seg is None:
+        max_seg = MAX_TRANSIT_SEGMENT_CM
+    if max_seg is None or max_seg <= 0:
+        return list(route)
+    out = []
+    cx, cy = start_x, start_y
+    for (gx, gy) in route:
+        d = dist(cx, cy, gx, gy)
+        if d <= max_seg:
+            out.append((gx, gy))
+        else:
+            n = int(math.ceil(d / max_seg))
+            for i in range(1, n + 1):
+                t = i / n
+                out.append((cx + (gx - cx) * t, cy + (gy - cy) * t))
+        cx, cy = gx, gy
+    return out
+
 # ==================================================================
 # ARC GENERATION
 # ==================================================================
@@ -235,8 +257,9 @@ def build_path(rid):
         skip = {pid}
         if idx > 0:
             skip.add(seq[idx - 1])
-        route = safe_transit(cx, cy, entry[0], entry[1], skip)
-        for (wx, wy) in route:
+        route   = safe_transit(cx, cy, entry[0], entry[1], skip)
+        chunked = slice_transit(cx, cy, route)
+        for (wx, wy) in chunked:
             pts.append({"x": wx, "y": wy, "type": "move", "pole": pid, "arc_deg": 0})
             cx, cy = wx, wy
 
@@ -346,6 +369,9 @@ def run_config_dict(rid, robot_pts):
         total += math.hypot(robot_pts[i]["x"] - robot_pts[i-1]["x"],
                             robot_pts[i]["y"] - robot_pts[i-1]["y"])
 
+    # Note: `bluetooth_address` is intentionally absent. setup_robots.py
+    # writes it into the JSON; the merge in main() (and the equivalent
+    # in interactivepage.html) preserves whatever it last saved.
     return {
         "rid":                rid,
         "dir":                direction,
@@ -357,7 +383,6 @@ def run_config_dict(rid, robot_pts):
         "seq":                list(cfg["seq"]),
         "start_world":        [sx, sy],
         "path_csv":           "path_" + rid + "_robot.csv",
-        "bluetooth_address":  BLUETOOTH_ADDRESSES.get(rid, ""),
         "waypoint_count":     len(robot_pts),
         "total_distance_cm":  round(total, 2),
     }
@@ -390,9 +415,21 @@ def main():
         with open(robot_csv_path, "w", newline="") as f:
             f.write(robot_csv_text(rid, robot_pts))
 
+        # Preserve the bluetooth_address that setup_robots.py last wrote.
+        # If the file doesn't exist yet, leave it empty — run_robot.py will
+        # tell the user to run setup_robots.py.
         config_path = os.path.join(out_dir, "run_config_" + rid + ".json")
+        existing_addr = ""
+        if os.path.exists(config_path):
+            try:
+                with open(config_path) as f:
+                    existing_addr = json.load(f).get("bluetooth_address", "")
+            except (json.JSONDecodeError, OSError):
+                existing_addr = ""
+        new_cfg = run_config_dict(rid, robot_pts)
+        new_cfg["bluetooth_address"] = existing_addr
         with open(config_path, "w") as f:
-            f.write(run_config_text(rid, robot_pts))
+            json.dump(new_cfg, f, indent=2)
 
         cfg = ROBOTS[rid]
         print("Robot " + rid + " | start=" + str(cfg["start"]) +

@@ -18,7 +18,7 @@ from irobot_edu_sdk.robots import event, Create3
 # ---------- fixed addresses ----------
 BLUETOOTH_ADDRESSES = {
     "A": "38E42E1C-5EA3-F705-C05D-43EB8600C88B",
-    "B": "BA5D90F5-FF5D-4870-0CCD-5034A75EE39F",
+    "B": "BDAFD1BE-45FC-A601-E2B1-A0AD8A97AFB6",
 }
 
 # ---------- load per-robot color from run_config_<RID>.json ----------
