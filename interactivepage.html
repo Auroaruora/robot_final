@@ -396,6 +396,13 @@ async function applyConfig(){
   POLES={};document.querySelectorAll('.pchip').forEach(el=>{POLES[+el.dataset.id]=[+el.querySelector('.px').value,+el.querySelector('.py').value]});
   ROBOTS.A={start:[+document.getElementById('aX').value,+document.getElementById('aY').value],seq:document.getElementById('aSeq').value.split(',').map(Number).filter(n=>POLES[n]),dir:document.getElementById('aDir').value,circles:+document.getElementById('aCir').value};
   ROBOTS.B={start:[+document.getElementById('bX').value,+document.getElementById('bY').value],seq:document.getElementById('bSeq').value.split(',').map(Number).filter(n=>POLES[n]),dir:document.getElementById('bDir').value,circles:+document.getElementById('bCir').value};
+  // Re-read compute_path.py from disk so external edits to fields the form
+  // doesn't manage (e.g. MAX_TRANSIT_SEGMENT_CM) aren't clobbered by the
+  // stale in-memory copy loaded at folder-pick time.
+  if(fileHandle){
+    try{fileContent=await(await fileHandle.getFile()).text()}
+    catch(e){console.warn('Re-read compute_path.py failed, using cached content',e)}
+  }
   let saved=false;
   if(fileContent){
     fileContent=rewriteConfig(fileContent);
